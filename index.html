@@ -861,7 +861,7 @@ function renderCaptureUI() {
     ? 'Mount the phone facing forward in landscape. Tap Start, then the red button to record. Photos are taken by themselves as you drive.'
     : 'Tap Start, hold the phone upright in portrait or landscape, and photograph anything that is wrong or missing on the map.'));
   else if (drv && !drive.on) intro.append(h('b', {}, 'Ready to record'), h('div', {}, 'Tap the red button before you set off. Tap it again (it becomes a square) to end the drive.'));
-  intro.hidden = !intro.childNodes.length;
+  intro.hidden = !intro.childNodes.length || toolsOpen;
   $('#driveStats').hidden = !(drv && drive.on);
   if (!drv) $('#guide').hidden = true;
   if (toolsOpen) renderTools();
@@ -872,7 +872,7 @@ function onPrimary() {
   if (drive.on) endDrive(); else startDrive();
   renderCaptureUI();
 }
-function toggleTools(force) { toolsOpen = force ?? !toolsOpen; $('#tools').hidden = !toolsOpen; $('#btnTools').setAttribute('aria-expanded', String(toolsOpen)); if (toolsOpen) renderTools(); }
+function toggleTools(force) { toolsOpen = force ?? !toolsOpen; $('#tools').hidden = !toolsOpen; $('#btnTools').setAttribute('aria-expanded', String(toolsOpen)); if (toolsOpen) renderTools(); $('#intro').hidden = toolsOpen || !$('#intro').childNodes.length; }
 function renderTools() {
   const t = $('#tools'); t.innerHTML = ''; const drv = captureMode === 'drive';
   const tog = (label, checked, fn, hint, disabled) => { const i = h('input', { type: 'checkbox', checked, disabled }); i.onchange = () => fn(i.checked); return h('label', {}, i, label, hint ? h('span', { class: 'hint' }, hint) : null); };

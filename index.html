@@ -255,7 +255,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -2815,11 +2815,11 @@ function renderObjectStep() {
     ob.osm ? h('div', { class: 'small' }, h('b', {}, 'Already in OSM: '), `${ob.osm.label} (node ${ob.osm.id}), ${fmtM(llDist(ob, ob.osm))} from where the photos put it. Confirming records that it's still there.`) : h('div', { class: 'small muted' }, 'Not in OSM yet.'),
     (ob.notes || []).length ? h('div', { class: 'small muted' }, ob.notes.join(' ')) : null,
     ob.osm && !(ob.kind === 'sign') ? null : h('div', { class: 'row' }, typeSel, spd), keepBox, aheadPanel(ob), warnedBy(ob),
-    cur ? h('div', { class: 'muted small' }, cur.kind === 'seen' ? `Showing photo ${objState.view + 1}: detected here, ${fmtM(cur.dist)} from the camera.` : `Showing photo ${objState.view + 1}: the object should be inside the dashed ring (${fmtM(cur.dist)} away) but wasn't detected. Hidden, gone, or a false detection elsewhere?`) : null);
+    cur ? h('div', { class: 'muted small' }, cur.kind === 'seen' ? `Showing photo ${objState.view + 1}: detected here, ${fmtM(cur.dist)} from the camera.` : (ob.kind === 'calming' ? `Showing photo ${objState.view + 1}: the bump should be inside the dashed ring (${fmtM(cur.dist)} away). Look for a raised strip or road markings.` : `Showing photo ${objState.view + 1}: the object should be inside the dashed ring (${fmtM(cur.dist)} away) but wasn't detected. Hidden, gone, or a false detection elsewhere?`)) : null);
   const act = (status) => objAction(ob, status);
   const buttons = h('div', { class: 'row' },
     h('button', { class: 'btn primary', onclick: () => act('approved') }, SIGN_KEEP[ob.type] ? 'Keep (A)' : ob.osm && ob.kind !== 'sign' ? 'Confirm (A)' : 'Approve (A)'),
-    h('button', { class: 'btn', onclick: () => act('reprocess') }, 'Re-process (R)'),
+    ob.kind === 'calming' ? null : h('button', { class: 'btn', onclick: () => act('reprocess') }, 'Re-process (R)'),
     h('button', { class: 'btn danger', onclick: () => act('ignored') }, 'Ignore (I)'),
     h('button', { class: 'btn small', disabled: objState.i === 0, onclick: () => { objState.i--; objState.view = 0; renderObjectStep(); } }, '‹ Back'),
     h('button', { class: 'btn small', onclick: () => { objState.i++; objState.view = 0; renderObjectStep(); } }, 'Skip ›'));
@@ -2914,7 +2914,7 @@ function bulkBar(v) {
 document.addEventListener('keydown', e => {
   if (view !== 'objects' || (e.target.closest && e.target.closest('input,textarea,select,dialog[open]')) || e.metaKey || e.ctrlKey || e.altKey) return;
   const list = objFilterList(), ob = list[objState.i]; const k = e.key.toLowerCase(); if (!ob && !['arrowleft'].includes(k)) return;
-  if (k === 'a') objAction(ob, 'approved'); else if (k === 'r') objAction(ob, 'reprocess'); else if (k === 'i') objAction(ob, 'ignored');
+  if (k === 'a') objAction(ob, 'approved'); else if (k === 'r') { if (ob.kind !== 'calming') objAction(ob, 'reprocess'); } else if (k === 'i') objAction(ob, 'ignored');
   else if (k === 'arrowright') { objState.i++; objState.view = 0; renderObjectStep(); } else if (k === 'arrowleft') { objState.i = Math.max(0, objState.i - 1); objState.view = 0; renderObjectStep(); }
   else if (/^[1-9]$/.test(k)) { objState.view = +k - 1; renderObjectStep(); } else return;
   e.preventDefault();

@@ -99,15 +99,15 @@ body.cam header.top{display:none}
 .modes button{border:0;background:none;color:#fff;opacity:.7;padding:8px 12px;border-radius:9px;font:600 14px var(--font);min-height:40px;cursor:pointer;white-space:nowrap}
 .modes button[aria-checked="true"]{background:#1d8656;opacity:1}
 .modes button:disabled{opacity:.3;cursor:not-allowed}
-.primary{width:74px;height:74px;border-radius:50%;border:4px solid #fff;background:transparent;display:grid;place-items:center;cursor:pointer;padding:0;color:#fff;transition:border-color .15s}
-.primary .lbl{display:block;transition:all .15s}
-.primary.start .lbl{font:700 15px var(--font)}
-.primary.shutter .lbl{width:58px;height:58px;border-radius:50%;background:#fff}
-.primary.shutter:active .lbl{transform:scale(.88)}
-.primary.record .lbl{width:56px;height:56px;border-radius:50%;background:#e5352b}
-.primary.stop{border-color:#e5352b}
-.primary.stop .lbl{width:28px;height:28px;border-radius:6px;background:#e5352b}
-.primary:focus-visible,.modes button:focus-visible,.toolbtn:focus-visible{outline:3px solid #7fb0ff;outline-offset:3px}
+.shut{width:74px;height:74px;border-radius:50%;border:4px solid #fff;background:transparent;display:grid;place-items:center;cursor:pointer;padding:0;color:#fff;transition:border-color .15s}
+.shut .lbl{display:block;transition:all .15s}
+.shut.start .lbl{font:700 15px var(--font)}
+.shut.shutter .lbl{width:58px;height:58px;border-radius:50%;background:#fff}
+.shut.shutter:active .lbl{transform:scale(.88)}
+.shut.record .lbl{width:56px;height:56px;border-radius:50%;background:#e5352b}
+.shut.stop{border-color:#e5352b}
+.shut.stop .lbl{width:28px;height:28px;border-radius:6px;background:#e5352b}
+.shut:focus-visible,.modes button:focus-visible,.toolbtn:focus-visible{outline:3px solid #7fb0ff;outline-offset:3px}
 .toolbtn{justify-self:end;width:48px;height:48px;border-radius:50%;border:0;background:#ffffff1f;color:#fff;display:grid;place-items:center;cursor:pointer}
 .toolbtn[aria-expanded="true"]{background:#fff;color:#000}
 .tools{position:absolute;right:calc(var(--railw) + max(12px,env(safe-area-inset-right,0px)));bottom:calc(var(--railh) + 10px);width:min(310px,calc(100% - 24px - var(--railw)));max-height:calc(100% - var(--railh) - 20px);overflow:auto;background:#121815f4;border:1px solid #ffffff2a;border-radius:14px;padding:6px;display:flex;flex-direction:column;z-index:5}
@@ -228,7 +228,7 @@ input[type=range]{width:100%}
       <div class="modes" role="radiogroup" aria-label="Capture mode">
         <button role="radio" data-m="hand" aria-checked="true">On foot</button><button role="radio" data-m="drive" aria-checked="false">Drive</button>
       </div>
-      <button class="primary start" id="btnPrimary"><span class="lbl">Start</span></button>
+      <button class="shut start" id="btnPrimary"><span class="lbl">Start</span></button>
       <button class="toolbtn" id="btnTools" aria-label="More options" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
     </div>
   </section>
@@ -255,7 +255,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -1323,7 +1323,7 @@ function renderCaptureUI() {
   for (const b of document.querySelectorAll('.modes button')) { const on = b.dataset.m === captureMode; b.setAttribute('aria-checked', String(on)); b.disabled = drive.on && !on; }
   renderBadge();
   const pb = $('#btnPrimary');
-  pb.className = 'primary ' + (!sensors.started ? 'start' : !drv ? 'shutter' : drive.on ? 'stop' : 'record');
+  pb.className = 'shut ' + (!sensors.started ? 'start' : !drv ? 'shutter' : drive.on ? 'stop' : 'record');
   pb.querySelector('.lbl').textContent = sensors.started ? '' : (sensors.starting ? '…' : 'Start');
   pb.setAttribute('aria-label', !sensors.started ? 'Start camera, compass and GPS' : !drv ? 'Take photo' : drive.on ? 'End drive' : 'Start recording the drive');
   const intro = $('#intro'); intro.innerHTML = '';
@@ -2622,7 +2622,8 @@ async function reprocessObject(ob) {
   else if (gp) { p = gp; how = tri ? `sight lines too parallel to cross reliably (${Math.round(tri.spreadDeg)}°); used where it meets the ground in ${gnd.length} photo${gnd.length > 1 ? 's' : ''}` : `placed where it meets the ground in ${gnd.length} photo${gnd.length > 1 ? 's' : ''}`; }
   const found = views.filter(v => !v.missed).length;
   if (p) { const ll = mkProj(ob.lat, ob.lon).inv(p[0], p[1]); ob.lat = ll.lat; ob.lon = ll.lon; }
-  ob.views = views.filter(v => !v.missed); ob.missed = views.filter(v => v.missed).map(v => v.o); ob.refined = true; ob.status = 'reprocessed';
+  if (found) ob.views = views.filter(v => !v.missed);   // nothing re-found: keep the original sightings to look at
+  ob.missed = views.filter(v => v.missed).map(v => v.o); ob.refined = true; ob.status = 'reprocessed';
   scoreObject(ob); if (looked) ob.conf = Math.round(Math.min(1, ob.conf, found / looked + (tri && tri.used >= 3 ? 0.1 : 0)) * 100) / 100;
   ob.notes = [`Re-processed: found in ${found} of ${looked} photos that should show it${found ? '' : ' (probably not there, or hidden)'}.`, how ? `Position: ${how}.` : 'Position unchanged.', p ? `Moved ${llDist(before, ob).toFixed(1)} m.` : ''].filter(Boolean);
   await saveObject(ob);

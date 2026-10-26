@@ -301,6 +301,16 @@ A practical route is to keep this web app as the review and upload desk, and lat
 
 ---
 
+## Starting fresh
+
+Settings → *Start fresh* has four options, each needing a second tap to confirm:
+- *Delete all photos and surveys*: then import a zip or capture again.
+- *Clear downloaded OSM data*: it's fetched again as needed.
+- *Remove the vision model download*: frees about 165 MB.
+- *Reset everything*: also signs you out and restores default settings.
+
+None of these touch OpenStreetMap itself. Export first if you want to keep anything.
+
 ## OSM etiquette
 
 - You review and approve every change; nothing is uploaded automatically, so this is ordinary manual mapping.

@@ -247,7 +247,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.5.1';
+const VERSION = '0.5.2';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -305,7 +305,7 @@ const store = (() => {
   return {
     put: (n, o) => tx(n, 'readwrite', s => s.put(o)), get: (n, k) => tx(n, 'readonly', s => s.get(k)),
     all: n => tx(n, 'readonly', s => s.getAll()), del: (n, k) => tx(n, 'readwrite', s => s.delete(k)),
-    range: (n, lo, hi) => tx(n, 'readonly', s => s.getAll(IDBKeyRange.bound(lo, hi))), delRange: (n, lo, hi) => tx(n, 'readwrite', s => s.delete(IDBKeyRange.bound(lo, hi)))
+    range: (n, lo, hi) => tx(n, 'readonly', s => s.getAll(IDBKeyRange.bound(lo, hi))), clear: n => tx(n, 'readwrite', s => s.clear()), delRange: (n, lo, hi) => tx(n, 'readwrite', s => s.delete(IDBKeyRange.bound(lo, hi)))
   };
 })();
 const OBS = new Map();
@@ -314,8 +314,21 @@ const annSigs = new Map();
 const annSig = a => JSON.stringify([a.status, a.preset, a.values, a.wayId, a.lat, a.lon, a.text, a.x, a.y, a.dist]);
 function stampAnns(o) { for (const a of o.anns) { const sg = annSig(a); if (annSigs.get(a.id) !== sg) { if (annSigs.has(a.id) || !a.updated) a.updated = Date.now(); annSigs.set(a.id, sg); } } }
 function saveObs(o) { stampAnns(o); o.updated = Date.now(); clearTimeout(saveTimers[o.id]); saveTimers[o.id] = setTimeout(() => store.put('obs', o).catch(e => toast('Could not save: ' + e.message)), 250); }
-const photoURLs = new Map();
-const photoURL = o => { if (!photoURLs.has(o.id)) photoURLs.set(o.id, URL.createObjectURL(o.photo)); return photoURLs.get(o.id); };
+const photoURLs = new Map(), urlOwner = new Map();
+const photoURL = o => { if (!photoURLs.has(o.id)) { const u = URL.createObjectURL(o.photo); photoURLs.set(o.id, u); urlOwner.set(u, o.id); } return photoURLs.get(o.id); };
+// Safari can lose its handle to a photo stored in the database (often under memory pressure). Re-read it and retry once.
+const recovering = new Set();
+document.addEventListener('error', async ev => {
+  const img = ev.target; if (!img || img.tagName !== 'IMG') return; const id = urlOwner.get(img.src); if (!id || recovering.has(id)) return;
+  recovering.add(id); const o = OBS.get(id); if (!o) return;
+  try {
+    let blob; try { blob = new Blob([await o.photo.arrayBuffer()], { type: 'image/jpeg' }); } catch { const fresh = await store.get('obs', id); if (!fresh) throw new Error('missing'); blob = new Blob([await fresh.photo.arrayBuffer()], { type: 'image/jpeg' }); }
+    o.photo = blob; const old = photoURLs.get(id); urlOwner.delete(old); URL.revokeObjectURL(old); photoURLs.delete(id);
+    const u = photoURL(o); document.querySelectorAll('img').forEach(im => { if (im.src === old) im.src = u; });
+  } catch { toast('A photo could not be read from storage. Reloading the app usually fixes this; if not, re-import it.'); }
+  setTimeout(() => recovering.delete(id), 5000);
+}, true);
+const freeCanvas = c => { if (c) { c.width = 0; c.height = 0; } };   // iOS counts canvas memory until a canvas is shrunk
 async function deleteObs(list) { for (const o of list) { OBS.delete(o.id); await store.del('obs', o.id); const u = photoURLs.get(o.id); if (u) { URL.revokeObjectURL(u); photoURLs.delete(o.id); } } }
 function migrate(o) {
   if (o.osm) delete o.osm;
@@ -646,6 +659,7 @@ const PAL = { 'Road': [128, 64, 128], 'Lane Marking - General': [255, 255, 255],
   'Traffic Sign (Front)': [220, 220, 0], 'Car': [0, 0, 142], 'Truck': [0, 0, 70], 'Bus': [0, 60, 100], 'Person': [220, 20, 60], 'Catch Basin': [255, 0, 0], 'Manhole': [0, 255, 0], 'Fire Hydrant': [255, 80, 80], 'Ego Vehicle': [40, 40, 40] };
 const SEG_COLORS = VISTAS.map(n => PAL[n] || [120, 120, 120]);
 let TJS = null, VM = null, vmLoading = null, forceCPU = false;
+async function releaseModel() { const m = VM; VM = null; vmLoading = null; try { m && m.model && m.model.dispose && await m.model.dispose(); } catch {} }
 function visionModel(status) {
   if (VM) return Promise.resolve(VM);
   if (!vmLoading) vmLoading = (async () => {
@@ -671,7 +685,7 @@ async function segmentPhoto(o, opt = {}) {
   const runs = [];
   for (const flip of passes > 1 ? [false, true] : [false]) {
     let src = c; if (flip) { src = document.createElement('canvas'); src.width = cw; src.height = ch; const g = src.getContext('2d'); g.translate(cw, 0); g.scale(-1, 1); g.drawImage(c, 0, 0); }
-    const inp = await m.proc(await TJS.RawImage.fromCanvas(src)); const out = await m.model(inp);
+    const inp = await m.proc(await TJS.RawImage.fromCanvas(src)); if (src !== c) freeCanvas(src); const out = await m.model(inp);
     const [, Q, K1] = out.class_queries_logits.dims, [, , mh, mw] = out.masks_queries_logits.dims, [, , ph, pw] = inp.pixel_values.dims;
     // the part of the padded input that holds the photo, as the processor reports it
     let rh = ph, rw = pw; const rs = inp.reshaped_input_sizes && inp.reshaped_input_sizes[0];
@@ -698,13 +712,14 @@ async function segmentPhoto(o, opt = {}) {
     let bi = 0; for (let j = 1; j < K; j++) if (acc[j] > acc[bi]) bi = j; if (acc[bi] > 0.05) L[y * W + x] = m.map[bi];
   }
   const g = document.createElement('canvas'); g.width = W; g.height = H; const gc = g.getContext('2d', { willReadFrequently: true }); gc.drawImage(c, 0, 0, W, H);
-  return { L, rgb: gc.getImageData(0, 0, W, H).data, W, H, passes };
+  const rgb = gc.getImageData(0, 0, W, H).data; freeCanvas(g); freeCanvas(c); for (const r of runs) r.ml = null;
+  return { L, rgb, W, H, passes };
 }
 const rle = L => { const out = []; let v = L[0], n = 0; for (let i = 0; i < L.length; i++) { if (L[i] === v) n++; else { out.push(v, n); v = L[i]; n = 1; } } out.push(v, n); return out; };
 function segImageURL(vis) {
   const c = document.createElement('canvas'); c.width = vis.W; c.height = vis.H; const g = c.getContext('2d'); const im = g.createImageData(vis.W, vis.H); let i = 0;
   for (let k = 0; k < vis.rle.length; k += 2) { const col = SEG_COLORS[vis.rle[k]]; for (let n = 0; n < vis.rle[k + 1]; n++, i++) if (col) { im.data.set(col, i * 4); im.data[i * 4 + 3] = 255; } }
-  g.putImageData(im, 0, 0); return c.toDataURL('image/png');
+  g.putImageData(im, 0, 0); const url = c.toDataURL('image/png'); freeCanvas(c); return url;
 }
 async function analysePhoto(o, opt) {
   const seg = await segmentPhoto(o, opt);
@@ -763,7 +778,7 @@ async function runAnalysis(list, label) {
       for (let attempt = 0; attempt < 2 && !okNow; attempt++) {
         try { await withTimeout(analysePhoto(o, opt || undefined), opt ? 120000 : 90000); okNow = true; if (opt) vjob.lighter++; }
         catch (e) { vjob.lastError = e.message || String(e); console.warn('analysis failed', o.id, e);
-          if (/stopped responding|device|lost|memory/i.test(vjob.lastError) && VM && VM.dev === 'GPU') { forceCPU = true; VM = null; vmLoading = null; vjob.status = 'Graphics chip stopped responding: continuing on the processor (slower)…'; vNotify(); try { await withTimeout(visionModel(), 300000); } catch {} }
+          if (/stopped responding|device|lost|memory/i.test(vjob.lastError) && VM && VM.dev === 'GPU') { forceCPU = true; await releaseModel(); vjob.status = 'Graphics chip stopped responding: continuing on the processor (slower)…'; vNotify(); try { await withTimeout(visionModel(), 300000); } catch {} }
           if (!opt) { opt = { passes: 1, maxLong: 1024 }; vjob.status = 'Running short of memory: switching to lighter analysis…'; vNotify(); }
           else break; }
         await sleep(30);
@@ -779,6 +794,7 @@ async function runAnalysis(list, label) {
   if (vjob.cancel && vjob.done < vjob.total && !vjob.failed) msg.push('stopped');
   toast(msg.join('. ') + '.', vjob.failed ? 12000 : 5000);
   vjob.running = false; vNotify();
+  await releaseModel();
   if (view === 'road') renderRoad(); else if (view === 'detail') renderDetail(); else if (view === 'surveys') renderSurveys();
 }
 function progressBox() {
@@ -1422,7 +1438,7 @@ async function videoFrame(trip, t) {
   const sec = (t - v.start) / 1000; if (sec < 0 || (isFinite(v.el.duration) && sec > v.el.duration)) throw new Error('That moment is outside the recorded video.');
   await new Promise((res, rej) => { v.el.onseeked = res; setTimeout(() => rej(new Error('Could not seek in the video.')), 8000); v.el.currentTime = sec; });
   const c = document.createElement('canvas'); c.width = v.el.videoWidth; c.height = v.el.videoHeight; c.getContext('2d').drawImage(v.el, 0, 0);
-  return { blob: await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9)), w: c.width, h: c.height };
+  const w = c.width, hh = c.height; const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9)); freeCanvas(c); return { blob, w, h: hh };
 }
 
 /* ---- post-processing: Kalman filter + RTS smoother over the whole GPS trail ---- */
@@ -1506,8 +1522,8 @@ async function importPhoto(file) {
   const bmp = await createImageBitmap(file);
   const c = document.createElement('canvas'); const scale = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
   c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
-  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); bmp.close && bmp.close();
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88)); freeCanvas(c);
   let lat = ex.lat, lon = ex.lon, acc = ex.lat != null ? 10 : null, posSrc = 'photo';
   if (lat == null && sensors.pos) { lat = sensors.pos.lat; lon = sensors.pos.lon; acc = sensors.pos.acc; posSrc = 'current location'; }
   const last = [...OBS.values()].sort((a, b) => b.created.localeCompare(a.created))[0];
@@ -2151,7 +2167,7 @@ function cropURL(o, box, pad = 0.4) {
   const p = (async () => { const bmp = await createImageBitmap(o.photo); const w = box[2] - box[0], hh = box[3] - box[1];
     const x0 = Math.max(0, (box[0] - w * pad) * bmp.width), y0 = Math.max(0, (box[1] - hh * pad) * bmp.height), x1 = Math.min(bmp.width, (box[2] + w * pad) * bmp.width), y1 = Math.min(bmp.height, (box[3] + hh * pad) * bmp.height);
     const sc = Math.min(4, 160 / Math.max(1, y1 - y0)); const c = document.createElement('canvas'); c.width = Math.max(8, Math.round((x1 - x0) * sc)); c.height = Math.max(8, Math.round((y1 - y0) * sc));
-    c.getContext('2d').drawImage(bmp, x0, y0, x1 - x0, y1 - y0, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.85); })();
+    c.getContext('2d').drawImage(bmp, x0, y0, x1 - x0, y1 - y0, 0, 0, c.width, c.height); bmp.close && bmp.close(); const u = c.toDataURL('image/jpeg', 0.85); freeCanvas(c); return u; })();
   cropCache.set(id, p); return p;
 }
 const cropCache = new Map();
@@ -2682,6 +2698,13 @@ async function exportData(list, withPhotos = true) {
 }
 
 /* ================= settings ================= */
+async function clearSurveys() {
+  if (drive.on) throw new Error('end the drive first');
+  for (const u of photoURLs.values()) URL.revokeObjectURL(u); photoURLs.clear(); urlOwner.clear(); OBS.clear(); current = null;
+  for (const n of ['obs', 'trails', 'video']) await store.clear(n);
+  CHECKS = {}; for (const k of ['lm.checks', 'lm.trips', 'lm.ignored', 'lm.clusterPos']) localStorage.removeItem(k);
+  roadCache.clear(); annSigs.clear(); tripVids.clear(); segURLs.clear(); cropCache.clear();
+}
 function renderSettings() {
   const v = $('#v-settings'); v.innerHTML = '';
   v.append(h('h2', {}, 'Settings'));
@@ -2723,6 +2746,20 @@ function renderSettings() {
   const imp = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ''; if (f) importSurvey(f).catch(err => toast('Import failed: ' + err.message, 7000)); } });
   v.append(h('div', { class: 'row', style: 'margin-bottom:8px' }, h('button', { class: 'btn small', onclick: () => exportData([...OBS.values()], true) }, 'Export with photos'),
     h('button', { class: 'btn small', onclick: () => exportData([...OBS.values()], false) }, 'Export reviews only'), h('label', { class: 'btn small' }, 'Import a zip', imp)));
+  v.append(h('h3', {}, 'Start fresh'));
+  v.append(h('p', { class: 'muted small', style: 'margin:0 0 8px' }, 'Export anything you want to keep first (above). These only affect this device; nothing on OpenStreetMap changes.'));
+  const fresh = (label, fn, done) => twoTap(h('button', { class: 'btn small danger' }, label), label, async () => { try { await fn(); toast(done, 5000); } catch (e) { toast('Could not finish: ' + e.message, 7000); } renderSettings(); });
+  v.append(h('div', { class: 'stack', style: 'align-items:flex-start' },
+    h('div', { class: 'row' }, fresh('Delete all photos and surveys', clearSurveys, 'All photos, drives, marks and checks deleted.'), h('span', { class: 'muted small' }, 'then import a zip or capture again')),
+    h('div', { class: 'row' }, fresh('Clear downloaded OSM data', async () => { await store.clear('cells'); CELLS.clear(); ctxCache.clear(); roadCache.clear(); }, 'OSM data cleared; it reloads as needed.'), h('span', { class: 'muted small' }, 'fetches the latest map again')),
+    h('div', { class: 'row' }, fresh('Remove the vision model download', async () => { await releaseModel(); if (window.caches) for (const k of await caches.keys()) if (/transformers/i.test(k)) await caches.delete(k); }, 'Vision model removed; it downloads again next time you analyse.'), h('span', { class: 'muted small' }, 'frees about 165 MB')),
+    h('div', { class: 'row' }, fresh('Reset everything', async () => {
+      await clearSurveys(); await store.clear('cells').catch(() => {}); await releaseModel();
+      if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+      if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+      for (const k of Object.keys(localStorage)) if (/^(lm|gt)\./.test(k)) localStorage.removeItem(k);
+      setTimeout(() => location.reload(), 600);
+    }, 'Everything reset. Reloading…'), h('span', { class: 'muted small' }, 'also signs you out and resets settings'))));
   v.append(h('h3', {}, 'Data on this device'));
   const done = [...OBS.values()].filter(o => o.anns.length ? o.anns.every(a => ['uploaded', 'rejected', 'merged'].includes(a.status)) : false);
   const info = h('span', { class: 'muted', style: 'flex:1' }, `${OBS.size} photos stored, ${done.length} fully done.`);

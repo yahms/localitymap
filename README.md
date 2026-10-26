@@ -159,7 +159,7 @@ Tap a circle to see where each photo placed it, with a sight line back to that p
 **Kerb height needs two directions.** A kerb's apparent width in a photo depends on its height, its top width and how far it is sideways from the camera, so one viewpoint can't separate height from width. Driving the road both ways sees each kerb from about 2 m and about 5 m away, and the app fits height and top width from those views. In testing this recovered a 150 mm barrier kerb and an 80 mm mountable kerb to within 3 mm. With only one direction you get a rough height, labelled as such, and no `kerb` suggestion.
 
 **What it doesn't do automatically:**
-- **Read signs.** On-device text readers misread speed limits in testing (a 60 came out as 30), and a wrong limit is worse than none. Each sign the model finds is shown as a crop next to *Stop / Give way / Speed limit [number]* for you to pick.
+- **Read signs.** On-device text readers misread speed limits in testing (a 60 came out as 30), and a wrong limit is worse than none. Each sign the model finds is shown for you to pick: *Stop*, *Give way* or *Speed limit [number]* (uploaded), or *Parking*, *Warning*, *Advisory speed* or *Other* (kept in your survey, see below).
 - **Tell power lines from phone lines, or low from high voltage.** Wires and utility poles are found; drawing the lines and tagging them stays with you.
 - **Tell trees from hedges.** Vegetation isn't split into individual trees.
 
@@ -194,6 +194,16 @@ Then: **Approve** `A`, **Re-process** `R`, **Ignore** `I`. It moves to the next 
 **Re-processing.** Objects you flag go through a deeper second pass. For every photo that should show the object (up to ten, spread across passes), the app crops tightly around where it ought to be, enlarges the crop up to four times and runs the model again. Small or distant objects are much easier to find this way. It then draws the sight line from each photo's camera to the object and finds where they cross, discarding any line more than 1.5 m out. If the lines come from directions at least 6° apart, that crossing becomes the position; if they're nearly parallel (all from straight behind), it uses where the object meets the ground instead. The object comes back to review with a note: how many photos it was found in, how the position was fixed, and how far it moved. Re-running *Find objects* later never undoes your decisions or hand-placed positions.
 
 Approving creates a normal mark (tagged as *found by the camera*), so it shows on the photo and goes through Upload, where you see every change before it's sent.
+
+**Signs kept, not uploaded.** OSM records what parking and warning signs *mean* (parking rules on the road, the speed hump itself) rather than the sign as an object, so these are kept in your survey with their photos, position and side of the road, and never uploaded:
+- **Parking sign**: what it says (no stopping, no parking, time limit, ticket, permit, loading zone, disabled) and the limit and times as written. Ready for adding street parking tags later.
+- **Warning sign**: what it warns of. For a speed hump, crossing, signals, stop, give way or roundabout warning, the app looks 200 m ahead in the direction you were driving and shows what it found there: objects from your photos, humps felt while driving, and what OSM already has, plus the photos further along that drive so you can mark the thing by hand if nothing was found.
+- **Advisory speed sign** (the number) and **Other sign** (the words).
+
+### Speed humps from the drive itself
+The camera model has no class for speed humps, and they're hard to see in photos. But you feel them. During a drive the app records the phone's vertical acceleration about 50 times a second (roughly 1–2 MB per hour). *Find objects* looks for two jolts one car-length apart (front wheels, then rear wheels), which is the signature of a hump, and places it where the front wheels were. Humps felt on several drives are grouped, and every drive that went over the spot *without* a jolt counts against it, so the confidence reads like "felt on 2 of 3 drives". A warning sign before it is shown as supporting evidence.
+
+Each one appears in the object review as **Bump in the road**, with the photos that look at the spot. Choose hump, bump, table, cushion or rumble strip and approve it to add a `traffic_calming` point on the road. Ignore it if the photos show a pothole, a driveway lip or a rail crossing, which can feel the same. Only drives recorded with 0.7 or later have motion data, and a phone in a loose holder rattles more, so a firm mount gives better results.
 
 ### Reviewing on an iPad or computer
 Survey data lives on the device that captured it. To review elsewhere:

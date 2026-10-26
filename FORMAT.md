@@ -48,10 +48,11 @@ Each photo entry:
 
 ### trails.json
 
-An array of `{ key: <trip id>, fixes: [...], orient: [...] }`. `t` is milliseconds since epoch.
+An array of `{ trip: <trip id>, t0, fixes: [...], orient: [...], motion: [...] }`. Times are milliseconds since epoch.
 
 - `fixes[]`: `{ t, lat, lon, acc, alt, altAcc, speed, course }` — every GPS fix (speed m/s, course degrees, nulls when the phone didn't report them).
 - `orient[]`: `{ t, f, r, u, h0, H }` — the camera basis (forward/right/up, ENU unit vectors, before compass correction) about 5 times a second, the raw compass heading `h0`, and the corrected heading `H`.
+- `motion[]` (0.7+): flat pairs `[ms since t0, vertical acceleration in tenths of m/s²]`, about 50 per second, gravity removed. Speed humps show as two jolts one wheelbase apart (front then rear wheels).
 
 ## Results
 
@@ -84,7 +85,7 @@ One entry per physical object, built from every photo that saw it:
 ```jsonc
 {
   "id": "obj-…",
-  "kind": "utility",              // lamp, utility, sign, signal, hydrant, drain, cabinet, bench, bin, mailbox, crosswalk
+  "kind": "utility",              // lamp, utility, sign, signal, hydrant, drain, cabinet, bench, bin, mailbox, crosswalk, calming
   "type": "power_pole",           // suggested or chosen OSM preset
   "lat": -31.95, "lon": 115.86,   // best position
   "height": 9,
@@ -94,6 +95,10 @@ One entry per physical object, built from every photo that saw it:
   "trips": 2, "spread": 0.6,      // separate passes; RMS scatter of the sightings in metres
   "conf": 0.84,
   "osm": { "id": "123", "label": "Power pole", "lat": ..., "lon": ... },  // matching OSM node within 5 m, if any
+  "bumps": [ { "trip": "...", "t": 0, "lat": 0, "lon": 0, "peak": 6.2, "pair": true, "kmh": 36, "course": 0 } ],   // calming only: jolts felt while driving
+  "drove": 3,                     // calming only: drives with motion data that passed over the spot
+  "values": { "hazard": "hump" }, // signs kept in the survey: parking_sign, warning_sign, advisory_speed, other_sign
+  "keep": true,                   // approved but not uploaded
   "status": "new|reprocess|reprocessed|approved|ignored",
   "refined": true, "moved": false, "notes": ["…"],
   "updated": 1730000000000

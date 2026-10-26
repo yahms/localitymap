@@ -255,7 +255,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.6.2';
+const VERSION = '0.7.0';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -875,7 +875,7 @@ function progressBox() {
 const KIND_PRESETS = { lamp: [['street_lamp', 'Street light']], utility: [['power_pole', 'Power pole'], ['utility_pole', 'Other pole'], ['street_lamp', 'Street light']], signal: [['traffic_signals', 'Traffic signals']],
   sign: [['stop', 'Stop sign'], ['give_way', 'Give way sign'], ['speed_sign', 'Speed limit sign']], hydrant: [['hydrant', 'Fire hydrant']], drain: [['drain', 'Storm drain']], cabinet: [['cabinet', 'Street cabinet']],
   bench: [['bench', 'Bench']], bin: [['waste_basket', 'Rubbish bin']], mailbox: [['post_box', 'Post box']], crosswalk: [['crossing', 'Pedestrian crossing']] };
-const KIND_LABEL = { lamp: 'Street light', utility: 'Utility pole', signal: 'Traffic signals', sign: 'Sign', hydrant: 'Fire hydrant', drain: 'Storm drain', cabinet: 'Street cabinet', bench: 'Bench', bin: 'Bin', mailbox: 'Post box', crosswalk: 'Crossing markings' };
+const KIND_LABEL = { calming: 'Bump in the road', lamp: 'Street light', utility: 'Utility pole', signal: 'Traffic signals', sign: 'Sign', hydrant: 'Fire hydrant', drain: 'Storm drain', cabinet: 'Street cabinet', bench: 'Bench', bin: 'Bin', mailbox: 'Post box', crosswalk: 'Crossing markings' };
 // Several views of one kerb from different sideways distances: fit w = a + b·e, then h = b·H/(1+b) and top width = a·(H−h)/H.
 function kerbFit(views) {
   const v = views.filter(k => k && k.w != null && k.e != null && k.n >= 3); if (v.length < 3) return null;
@@ -1277,7 +1277,8 @@ function currentPose(isDrive) {
 async function startSensors() {
   if (sensors.starting) return; sensors.starting = true;
   try { if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted') toast('Motion access was refused. Heading must then come from GPS or be set by hand.'); } } catch {}
-  addEventListener('deviceorientationabsolute', onOrient); addEventListener('deviceorientation', onOrient);
+  try { if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') await DeviceMotionEvent.requestPermission(); } catch {}
+  addEventListener('deviceorientationabsolute', onOrient); addEventListener('deviceorientation', onOrient); addEventListener('devicemotion', onMotion);
   if ('geolocation' in navigator && sensors.geoId == null)
     sensors.geoId = navigator.geolocation.watchPosition(onPos, e => toast('Location unavailable: ' + e.message), { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
   await startCamera();
@@ -1429,13 +1430,55 @@ async function capture(isDrive) {
 }
 
 /* ================= drive mode ================= */
+// Vertical acceleration while driving, ~50 per second: speed humps, bumps and rough surfaces show up here.
+// Stored as [ms since t0, tenths of m/s²] pairs; gravity is tracked with a slow low-pass so any mount angle works.
+const motionState = { g: null, last: 0 };
+function onMotion(e) {
+  if (!drive.on || !drive.trail) return; const a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
+  const v = [a.x, a.y, a.z], ms = motionState;
+  if (!ms.g) ms.g = v.slice(); else for (let i = 0; i < 3; i++) ms.g[i] += 0.02 * (v[i] - ms.g[i]);
+  const gn = Math.hypot(...ms.g); if (gn < 5) return;
+  const t = Date.now(); if (t - ms.last < 18) return; ms.last = t;
+  const vert = (v[0] * ms.g[0] + v[1] * ms.g[1] + v[2] * ms.g[2]) / gn - gn;
+  (drive.trail.motion || (drive.trail.motion = [])).push(t - (drive.trail.t0 || drive.startedAt), Math.round(vert * 10));
+}
+// Find bumps in a drive's motion record. A speed hump is hit twice, by the front then the rear wheels,
+// one wheelbase (2.2–3.6 m) apart; a single sharp jolt is kept only when it is very strong.
+function findBumps(tr, sm) {
+  const m = tr.motion; if (!m || m.length < 400 || !sm) return [];
+  const t0 = tr.t0 || 0, n = m.length >> 1, T = new Float64Array(n), A = new Float32Array(n);
+  for (let i = 0; i < n; i++) { T[i] = t0 + m[2 * i]; A[i] = m[2 * i + 1] / 10; }
+  const thr = new Float32Array(n);
+  for (let s0 = 0; s0 < n;) { let e = s0; while (e < n && T[e] - T[s0] < 5000) e++; const abs = []; for (let i = s0; i < e; i++) abs.push(Math.abs(A[i])); abs.sort((x, y) => x - y);
+    const th = Math.max(2.5, 6 * (abs[abs.length >> 1] || 0)); for (let i = s0; i < e; i++) thr[i] = th; s0 = Math.max(e, s0 + 1); }
+  const pk = [];
+  for (let i = 1; i < n - 1; i++) { const a = Math.abs(A[i]); if (a < thr[i] || a < Math.abs(A[i - 1]) || a < Math.abs(A[i + 1])) continue;
+    const last = pk[pk.length - 1]; if (last && T[i] - last.t < 120) { if (a > last.a) Object.assign(last, { t: T[i], a, thr: thr[i] }); continue; } pk.push({ t: T[i], a, thr: thr[i] }); }
+  const out = [], used = new Set();
+  for (let i = 0; i < pk.length; i++) {
+    if (used.has(i)) continue; const p = pk[i]; const st = sampleTrack(sm, p.t); if (!st || st.speed < 2.5) continue;
+    let pair = null; for (let j = i + 1; j < pk.length && pk[j].t - p.t < 2000; j++) { const d = st.speed * (pk[j].t - p.t) / 1000; if (d >= 2.2 && d <= 3.6 && pk[j].a >= 0.35 * p.a) { pair = j; break; } }
+    if (pair == null && p.a < 2 * p.thr) continue; if (pair != null) used.add(pair);
+    const c = st.course * D2R, ll = mkProj(st.lat, st.lon).inv(Math.sin(c) * 1.5, Math.cos(c) * 1.5);   // the phone sits ~1.5 m behind the front wheels
+    out.push({ trip: tr.trip, t: p.t, lat: ll.lat, lon: ll.lon, peak: Math.round(p.a * 10) / 10, pair: pair != null, kmh: Math.round(st.speed * 3.6), course: Math.round(st.course) });
+  }
+  return out;
+}
+// Did this drive pass over the point (within 8 m, moving)? Used to count drives that should have felt a bump.
+function droveOver(sm, lat, lon) {
+  const p = sm.pr.fwd(lat, lon);
+  for (let k = 0; k < sm.x.length - 1; k++) { const a = sm.x[k], b = sm.x[k + 1]; if (Math.hypot(a[2], a[3]) < 2.5) continue;
+    const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1e-9; const u = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2));
+    if (Math.hypot(a[0] + u * dx - p[0], a[1] + u * dy - p[1]) < 8) return true; }
+  return false;
+}
 const drive = { on: false, trip: null, count: 0, lastPos: null, lastT: 0, busy: false, timer: null, wake: null, odo: 0, startedAt: 0, trail: null, rec: null };
 async function wakeLock() { try { if ('wakeLock' in navigator) { drive.wake = await navigator.wakeLock.request('screen'); } } catch { toast('Keep the screen on yourself: this browser would not hold a wake lock.'); } }
 document.addEventListener('visibilitychange', () => { if (drive.on && document.visibilityState === 'visible') wakeLock(); if (drive.on && document.visibilityState === 'hidden') saveTrail(); });
 function startDrive() {
   if (!sensors.started) return;
   const trip = 'trip-' + newId();
-  Object.assign(drive, { on: true, trip, count: 0, lastPos: null, lastT: 0, odo: 0, startedAt: Date.now(), trail: { trip, fixes: [], orient: [] } });
+  Object.assign(drive, { on: true, trip, count: 0, lastPos: null, lastT: 0, odo: 0, startedAt: Date.now(), trail: { trip, fixes: [], orient: [], t0: Date.now(), motion: [] } }); motionState.g = null;
   const trips = loadLS('lm.trips', {}); trips[trip] = { started: new Date().toISOString(), mountOffset: S.mountOffset }; saveLS('lm.trips', trips);
   wakeLock(); clearInterval(drive.timer); drive.timer = setInterval(driveTick, 150);
   clearInterval(drive.trailTimer); drive.trailTimer = setInterval(saveTrail, 15000);
@@ -2182,7 +2225,7 @@ function renderRoad() {
 }
 
 /* ---- 2D map of everything the camera found along one road ---- */
-const KIND_COLOR = { lamp: '#ff3df0', utility: '#00c8ff', sign: '#e8c400', signal: '#ff8a00', hydrant: '#ff4040', drain: '#2ecc40', cabinet: '#aaaaaa', bench: '#b08060', bin: '#b08060', mailbox: '#d04040', crosswalk: '#ffffff' };
+const KIND_COLOR = { calming: '#ff6a00', lamp: '#ff3df0', utility: '#00c8ff', sign: '#e8c400', signal: '#ff8a00', hydrant: '#ff4040', drain: '#2ecc40', cabinet: '#aaaaaa', bench: '#b08060', bin: '#b08060', mailbox: '#d04040', crosswalk: '#ffffff' };
 let selLayer = null, roadSm = null, roadX = null;
 function offsetLine(ctx, w, off) { // a polyline parallel to the way, `off` metres to its right
   const g = w.nds.map(n => ctx.nodes[n]).filter(Boolean); if (g.length < 2) return [];
@@ -2509,7 +2552,7 @@ function osmKindOk(kind, t) {
     default: return true;
   }
 }
-const OBJ_HEIGHT = { lamp: 8, utility: 9, sign: 3, signal: 5, hydrant: 0.9, drain: 0.3, cabinet: 1.4, bench: 1, bin: 1, mailbox: 1.3, crosswalk: 0.2 };
+const OBJ_HEIGHT = { calming: 0.1, lamp: 8, utility: 9, sign: 3, signal: 5, hydrant: 0.9, drain: 0.3, cabinet: 1.4, bench: 1, bin: 1, mailbox: 1.3, crosswalk: 0.2 };
 const OBJ_CLASSES = { lamp: ['Pole', 'Utility Pole', 'Street Light'], utility: ['Utility Pole', 'Pole'], sign: ['Traffic Sign (Front)'], signal: ['Traffic Light'], hydrant: ['Fire Hydrant'], drain: ['Catch Basin'],
   cabinet: ['Junction Box'], bench: ['Bench'], bin: ['Trash Can'], mailbox: ['Mailbox'], crosswalk: ['Lane Marking - Crosswalk', 'Crosswalk - Plain'] };
 const saveObject = ob => { ob.updated = Date.now(); return store.put('objects', ob).catch(e => toast('Could not save: ' + e.message)); };
@@ -2526,6 +2569,15 @@ function expectedViews(ob) {
   return out;
 }
 function scoreObject(ob) {
+  if (ob.kind === 'calming') {
+    const bumps = ob.bumps || [], trips = new Set(bumps.map(b => b.trip)).size; ob.trips = trips; ob.expected = expectedViews(ob).length;
+    const pts = bumps.map(b => mkProj(ob.lat, ob.lon).fwd(b.lat, b.lon)); ob.spread = pts.length ? Math.round(Math.sqrt(pts.reduce((a, p) => a + p[0] * p[0] + p[1] * p[1], 0) / pts.length) * 10) / 10 : 0;
+    const hit = ob.drove ? Math.min(1, trips / ob.drove) : 0.5; const paired = bumps.some(b => b.pair);
+    ob.conf = Math.round(hit * (trips >= 2 ? 1 : 0.6) * (paired ? 1 : 0.6) * 100) / 100;
+    const ctx = ctxFor(ob.lat, ob.lon); ob.osm = null;
+    if (ctx) { let bd = 8; for (const [id, nd] of Object.entries(ctx.nodes)) { const t = nd.tags || {}; if (!(t.traffic_calming || t.railway === 'level_crossing' || t.barrier === 'cattle_grid')) continue; const d = llDist(ob, nd); if (d < bd) { bd = d; ob.osm = { id, label: poiLabel(t) || (t.railway ? 'Railway crossing' : 'Traffic calming'), tags: t, lat: nd.lat, lon: nd.lon }; } } }
+    return;
+  }
   const exp = expectedViews(ob); ob.expected = exp.length; const seen = new Set(ob.views.map(v => v.o)).size;
   const pts = ob.views.map(v => v.lat != null ? mkProj(ob.lat, ob.lon).fwd(v.lat, v.lon) : null).filter(Boolean); const spread = pts.length ? Math.sqrt(pts.reduce((a, p) => a + p[0] * p[0] + p[1] * p[1], 0) / pts.length) : 0;
   ob.trips = new Set(ob.views.map(v => (OBS.get(v.o) || {}).trip || v.o)).size; ob.spread = Math.round(spread * 10) / 10;
@@ -2552,9 +2604,22 @@ async function buildObjects() {
     const same = best.views.find(v => v.o === dt.o); if (same) { if (dt.dist < same.dist) Object.assign(same, dt); } else best.views.push(dt);
     if (best.status === 'new' && !best.moved && !best.refined) { best.lat = best.views.reduce((a, v) => a + v.lat, 0) / best.views.length; best.lon = best.views.reduce((a, v) => a + v.lon, 0) / best.views.length; }
   }
+  // bumps felt while driving, grouped across drives; each drive that went over the spot without a bump counts against it
+  const trails = await store.all('trails').catch(() => []); const sms = [];
+  for (const tr of trails) { const sm = tr.fixes && tr.fixes.length >= 5 && (tr.motion || []).length >= 400 ? smoothTrack(tr.fixes) : null; if (!sm) continue; sms.push({ trip: tr.trip, sm });   // only drives that recorded motion can say "no bump here"
+    for (const b of findBumps(tr, sm)) {
+      let best = null, bd = 1e9; for (const ob of all) { if (ob.kind !== 'calming') continue; const d = llDist(ob, b); if (d < 10 && d < bd) { best = ob; bd = d; } }
+      if (!best) { best = { id: 'obj-' + newId(), kind: 'calming', lat: b.lat, lon: b.lon, views: [], bumps: [], status: 'new', created: Date.now() }; all.push(best); OBJECTS.set(best.id, best); }
+      best.bumps = (best.bumps || []).filter(x => !(x.trip === b.trip && Math.abs(x.t - b.t) < 3000)); best.bumps.push(b);
+      if (best.status === 'new' && !best.moved) { best.lat = best.bumps.reduce((a, x) => a + x.lat, 0) / best.bumps.length; best.lon = best.bumps.reduce((a, x) => a + x.lon, 0) / best.bumps.length; }
+    } }
+  for (const ob of all) if (ob.kind === 'calming') {
+    const hit = new Set((ob.bumps || []).map(b => b.trip)); ob.drove = sms.filter(x => hit.has(x.trip) || droveOver(x.sm, ob.lat, ob.lon)).length;
+    if (!ob.type) ob.type = (ob.bumps || []).some(b => b.pair) ? 'hump' : 'bump';
+  }
   let n = 0;
   for (const ob of all) {
-    if (!ob.views.length && ob.status === 'new') { OBJECTS.delete(ob.id); await store.del('objects', ob.id).catch(() => {}); continue; }
+    if (!ob.views.length && !(ob.bumps || []).length && ob.status === 'new') { OBJECTS.delete(ob.id); await store.del('objects', ob.id).catch(() => {}); continue; }
     const hs = ob.views.map(v => v.height).filter(Boolean).sort((a, b) => a - b); ob.height = hs.length ? hs[hs.length >> 1] : null;
     if (!ob.type) ob.type = suggestType(ob);
     scoreObject(ob); await saveObject(ob); n++;
@@ -2563,7 +2628,7 @@ async function buildObjects() {
 }
 function suggestType(ob) {
   if (ob.kind === 'utility') { const wires = ob.views.some(v => { const o = OBS.get(v.o); return o && o.vision && o.vision.res.wires && o.vision.res.wires.wires; }); return wires ? 'power_pole' : 'utility_pole'; }
-  if (ob.kind === 'sign') return null;
+  if (ob.kind === 'sign') return null; if (ob.kind === 'calming') return 'hump';
   return (KIND_PRESETS[ob.kind] || [[null]])[0][0];
 }
 // ---- deep re-processing: look again in every photo that should show it, then intersect the sight lines
@@ -2594,6 +2659,7 @@ function blobsOf(L, W, H, ids) {
   return out;
 }
 async function reprocessObject(ob) {
+  if (ob.kind === 'calming') { ob.status = 'new'; ob.notes = ['Bumps are found from the drive\'s motion, not the photos, so re-processing doesn\'t apply. Drive over it again to confirm.']; await saveObject(ob); return; }
   const cands = expectedViews(ob).sort((a, b) => a.dist - b.dist); const byTrip = new Map();
   for (const c of cands) { const t = (OBS.get(c.o) || {}).trip || c.o; if (!byTrip.has(t)) byTrip.set(t, []); byTrip.get(t).push(c); }
   const pick = []; for (let r = 0; pick.length < 10 && r < 6; r++) for (const list of byTrip.values()) if (list[r] && pick.length < 10) pick.push(list[r]);
@@ -2643,10 +2709,50 @@ async function runObjectJob(label, list, fn) {
 }
 
 /* ================= Objects review ================= */
+const SIGN_KEEP = {
+  parking_sign: { label: 'Parking sign', fields: [
+    { k: 'what', label: 'What it says', opts: [['no_stopping', 'No stopping'], ['no_parking', 'No parking'], ['time_limit', 'Time limit (e.g. 2P)'], ['ticket', 'Ticket / paid parking'], ['permit', 'Permit or residents only'], ['loading', 'Loading zone'], ['disabled', 'Disabled parking'], ['other', 'Other']] },
+    { k: 'text', label: 'Limit and times, as on the sign', ph: 'e.g. 2P 8am–5:30pm Mon–Fri' }] },
+  warning_sign: { label: 'Warning sign', fields: [
+    { k: 'hazard', label: 'Warns of', opts: [['hump', 'Speed hump(s) ahead'], ['crossing', 'Pedestrian crossing ahead'], ['signals', 'Traffic signals ahead'], ['stop', 'Stop sign ahead'], ['give_way', 'Give way sign ahead'], ['roundabout', 'Roundabout ahead'],
+      ['school', 'School zone / children'], ['pedestrians', 'Pedestrians'], ['cyclists', 'Cyclists'], ['curve', 'Curve or bend'], ['side_road', 'Side road / crossroad'], ['narrows', 'Road narrows'], ['merge', 'Merge / lane ends'], ['dip', 'Dip'], ['slippery', 'Slippery'], ['animals', 'Animals'], ['other', 'Other']] },
+    { k: 'text', label: 'Words on the sign (optional)', ph: 'e.g. Speed humps next 400 m' }] },
+  advisory_speed: { label: 'Advisory speed sign', fields: [{ k: 'speed', label: 'Speed shown (km/h)', num: true }] },
+  other_sign: { label: 'Other sign', fields: [{ k: 'text', label: 'What it says', ph: 'e.g. Local traffic only' }] }
+};
+const CALMING_TYPES = [['hump', 'Speed hump'], ['bump', 'Speed bump (short, sharp)'], ['table', 'Raised table / platform'], ['cushion', 'Speed cushions'], ['rumble_strip', 'Rumble strip']];
+// What a warning sign leads you to expect further on, and how to recognise it in OSM or among found objects.
+const HAZARD_TARGET = {
+  hump: { label: 'speed hump', osm: t => !!t.traffic_calming, obj: ob => ob.kind === 'calming' && ob.status !== 'ignored' },
+  crossing: { label: 'crossing', osm: t => t.highway === 'crossing', obj: ob => ob.kind === 'crosswalk' },
+  signals: { label: 'traffic signals', osm: t => t.highway === 'traffic_signals', obj: ob => ob.kind === 'signal' },
+  stop: { label: 'stop sign', osm: t => t.highway === 'stop', obj: ob => ob.kind === 'sign' && ob.type === 'stop' },
+  give_way: { label: 'give way sign', osm: t => t.highway === 'give_way', obj: ob => ob.kind === 'sign' && ob.type === 'give_way' },
+  roundabout: { label: 'roundabout', osmWay: t => t.junction === 'roundabout' }
+};
+// Things ahead of a sign, in the direction the camera was travelling when it saw it.
+function aheadOf(ob, maxD = 200) {
+  const v = ob.views.slice().sort((a, b) => a.dist - b.dist)[0]; const o = v && OBS.get(v.o); if (!o) return null;
+  const hd = Hd(o) * D2R, dir = [Math.sin(hd), Math.cos(hd)], pr = mkProj(ob.lat, ob.lon);
+  const rel = (lat, lon) => { const [e, n] = pr.fwd(lat, lon); const along = e * dir[0] + n * dir[1]; return { along, cross: Math.abs(e * dir[1] - n * dir[0]) }; };
+  const isAhead = r => r.along > -5 && r.along < maxD && r.cross < Math.max(20, r.along * 0.35);
+  const tgt = HAZARD_TARGET[(ob.values || {}).hazard]; const found = [], osm = [];
+  if (tgt) {
+    if (tgt.obj) for (const x of OBJECTS.values()) { if (x === ob || !tgt.obj(x)) continue; const r = rel(x.lat, x.lon); if (isAhead(r)) found.push({ ob: x, d: Math.round(r.along) }); }
+    const mid = pr.inv(dir[0] * maxD / 2, dir[1] * maxD / 2); const ctx = ctxFor(mid.lat, mid.lon);
+    if (ctx) {
+      if (tgt.osm) for (const [id, nd] of Object.entries(ctx.nodes)) { if (!nd.tags || !tgt.osm(nd.tags)) continue; const r = rel(nd.lat, nd.lon); if (isAhead(r)) osm.push({ id, d: Math.round(r.along), label: poiLabel(nd.tags) || 'OSM node' }); }
+      if (tgt.osmWay) for (const [id, w] of Object.entries(ctx.ways)) { if (!tgt.osmWay(w.tags)) continue; let best = null; for (const nid of w.nds) { const nd = ctx.nodes[nid]; if (!nd) continue; const r = rel(nd.lat, nd.lon); if (isAhead(r) && (!best || r.along < best)) best = r.along; } if (best != null) osm.push({ id: 'w' + id, d: Math.round(best), label: 'Roundabout' }); }
+    }
+  }
+  const photos = [...OBS.values()].filter(p => p.trip && p.trip === o.trip && p.created > o.created).map(p => ({ p, r: rel(p.cam.lat, p.cam.lon) })).filter(x => isAhead(x.r)).sort((a, b) => a.p.created.localeCompare(b.p.created)).slice(0, 10);
+  found.sort((a, b) => a.d - b.d); osm.sort((a, b) => a.d - b.d);
+  return { tgt, found, osm, photos, ctxReady: !!ctxFor(...Object.values(pr.inv(dir[0] * maxD / 2, dir[1] * maxD / 2))) };
+}
 const OBJ_STATUS = { new: 'to review', reprocessed: 're-processed', reprocess: 'flagged', approved: 'approved', ignored: 'ignored' };
 let objState = { filter: 'review', kind: 'all', i: 0, view: 0 };
 function objFilterList() {
-  const f = objState.filter; let list = [...OBJECTS.values()].filter(ob => ob.views.length || ob.status !== 'new');
+  const f = objState.filter; let list = [...OBJECTS.values()].filter(ob => ob.views.length || (ob.bumps || []).length || ob.status !== 'new');
   if (objState.kind !== 'all') list = list.filter(ob => ob.kind === objState.kind);
   list = list.filter(ob => f === 'all' ? true : f === 'review' ? ['new', 'reprocessed'].includes(ob.status) : ob.status === f);
   const t = ob => { const v = ob.views[0]; const o = v && OBS.get(v.o); return o ? o.created : ''; };
@@ -2689,21 +2795,30 @@ function renderObjectStep() {
   const strip = h('div', { class: 'thumbs', style: 'grid-template-columns:repeat(auto-fill,minmax(72px,1fr))' });
   all.forEach((x, k) => { const o = OBS.get(x.o); if (!o) return; const im = h('img', { alt: '', style: 'object-fit:contain;background:#000' }); cropURL(o, objCropBox(o, x, ob.kind), 0.5).then(u => im.src = u);
     strip.append(h('button', { 'aria-label': (x.kind === 'seen' ? 'Seen in photo ' : 'Not detected in photo ') + (k + 1), style: `outline:${k === objState.view ? '3px solid var(--info)' : 'none'};border:2px ${x.kind === 'seen' ? 'solid var(--add)' : 'dashed var(--muted)'}`, onclick: () => { objState.view = k; renderObjectStep(); } }, im)); });
-  const typeSel = h('select', { id: 'f-objtype' }, h('option', { value: '' }, ob.kind === 'sign' ? 'Choose the sign…' : 'Choose…'), (KIND_PRESETS[ob.kind] || []).map(([val, l]) => h('option', { value: val, selected: ob.type === val }, l)));
+  const typeOpts = ob.kind === 'calming' ? CALMING_TYPES : (KIND_PRESETS[ob.kind] || []);
+  const typeSel = h('select', { id: 'f-objtype' }, h('option', { value: '' }, ob.kind === 'sign' ? 'Choose the sign…' : 'Choose…'), typeOpts.map(([val, l]) => h('option', { value: val, selected: ob.type === val }, l)),
+    ob.kind === 'sign' ? h('optgroup', { label: 'Kept in your survey, not uploaded' }, Object.entries(SIGN_KEEP).map(([val, d]) => h('option', { value: val, selected: ob.type === val }, d.label))) : null);
+  const keepBox = h('div', { class: 'stack' }); const drawKeep = () => { keepBox.innerHTML = ''; const d = SIGN_KEEP[ob.type]; if (!d) return; ob.values = ob.values || {};
+    for (const f of d.fields) keepBox.append(h('label', { class: 'small stack', style: 'gap:2px' }, f.label, f.opts
+      ? h('select', { onchange: e => { ob.values[f.k] = e.target.value; saveObject(ob); renderObjectStep(); } }, h('option', { value: '' }, 'Choose…'), f.opts.map(([v2, l]) => h('option', { value: v2, selected: ob.values[f.k] === v2 }, l)))
+      : h('input', { type: f.num ? 'number' : 'text', inputmode: f.num ? 'numeric' : null, placeholder: f.ph || '', value: ob.values[f.k] || '', onchange: e => { ob.values[f.k] = e.target.value; saveObject(ob); } })));
+    keepBox.append(h('div', { class: 'muted small' }, 'OSM has no good way to record this as a sign on its own, so it stays in your survey (with its photos and side of the road) and is not uploaded.')); };
+  drawKeep();
   const spd = h('input', { type: 'number', inputmode: 'numeric', step: 10, min: 10, max: 130, placeholder: 'km/h', style: 'width:6em', value: (ob.values || {}).maxspeed || '', hidden: ob.type !== 'speed_sign', 'aria-label': 'Speed limit' });
-  typeSel.onchange = () => { ob.type = typeSel.value || null; spd.hidden = ob.type !== 'speed_sign'; saveObject(ob); };
+  typeSel.onchange = () => { ob.type = typeSel.value || null; spd.hidden = ob.type !== 'speed_sign'; saveObject(ob); drawKeep(); if (ob.type === 'warning_sign') renderObjectStep(); };
   spd.oninput = () => { ob.values = Object.assign({}, ob.values, { maxspeed: spd.value }); };
   const confPill = h('span', { class: 'pill ' + (ob.conf >= 0.75 ? 'approved' : ob.conf >= 0.45 ? 'pending' : 'conflict') }, `confidence ${Math.round((ob.conf || 0) * 100)}%`);
   const info = h('div', { class: 'card stack' },
-    h('div', { class: 'row' }, h('b', { style: 'font-size:18px;flex:1' }, KIND_LABEL[ob.kind] + (ob.height ? ` ~${Math.round(ob.height)} m` : '')), h('span', { class: 'pill ' + (ob.status === 'approved' ? 'approved' : ob.status === 'ignored' ? 'rejected' : ob.status === 'reprocess' ? 'conflict' : 'pending') }, OBJ_STATUS[ob.status]), confPill),
-    h('div', { class: 'small' }, `Seen in ${views.length} of ${views.length + exp.length} photos that should show it · ${ob.trips || 1} pass${(ob.trips || 1) > 1 ? 'es' : ''} · sightings agree within ${ob.spread ?? '?'} m`),
+    h('div', { class: 'row' }, h('b', { style: 'font-size:18px;flex:1' }, KIND_LABEL[ob.kind] + (ob.height ? ` ~${Math.round(ob.height)} m` : '')), h('span', { class: 'pill ' + (ob.status === 'approved' ? 'approved' : ob.status === 'ignored' ? 'rejected' : ob.status === 'reprocess' ? 'conflict' : 'pending') }, ob.keep && ob.status === 'approved' ? 'kept, not uploaded' : OBJ_STATUS[ob.status]), confPill),
+    ob.kind === 'calming' ? h('div', { class: 'small' }, `Felt as a bump on ${ob.trips || 0} of ${ob.drove || ob.trips || 0} drive${(ob.drove || 0) === 1 ? '' : 's'} over this spot${(ob.bumps || []).some(b => b.pair) ? ', front and rear wheels one car-length apart (typical of a hump)' : ', as a single jolt'} · positions agree within ${ob.spread ?? '?'} m · ${views.length + exp.length} photo${views.length + exp.length === 1 ? '' : 's'} look at the spot. Check the photos: potholes, driveways and rail crossings can feel the same.`)
+      : h('div', { class: 'small' }, `Seen in ${views.length} of ${views.length + exp.length} photos that should show it · ${ob.trips || 1} pass${(ob.trips || 1) > 1 ? 'es' : ''} · sightings agree within ${ob.spread ?? '?'} m`),
     ob.osm ? h('div', { class: 'small' }, h('b', {}, 'Already in OSM: '), `${ob.osm.label} (node ${ob.osm.id}), ${fmtM(llDist(ob, ob.osm))} from where the photos put it. Confirming records that it's still there.`) : h('div', { class: 'small muted' }, 'Not in OSM yet.'),
     (ob.notes || []).length ? h('div', { class: 'small muted' }, ob.notes.join(' ')) : null,
-    ob.osm ? null : h('div', { class: 'row' }, typeSel, spd),
+    ob.osm && !(ob.kind === 'sign') ? null : h('div', { class: 'row' }, typeSel, spd), keepBox, aheadPanel(ob), warnedBy(ob),
     cur ? h('div', { class: 'muted small' }, cur.kind === 'seen' ? `Showing photo ${objState.view + 1}: detected here, ${fmtM(cur.dist)} from the camera.` : `Showing photo ${objState.view + 1}: the object should be inside the dashed ring (${fmtM(cur.dist)} away) but wasn't detected. Hidden, gone, or a false detection elsewhere?`) : null);
   const act = (status) => objAction(ob, status);
   const buttons = h('div', { class: 'row' },
-    h('button', { class: 'btn primary', onclick: () => act('approved') }, ob.osm ? 'Confirm (A)' : 'Approve (A)'),
+    h('button', { class: 'btn primary', onclick: () => act('approved') }, SIGN_KEEP[ob.type] ? 'Keep (A)' : ob.osm && ob.kind !== 'sign' ? 'Confirm (A)' : 'Approve (A)'),
     h('button', { class: 'btn', onclick: () => act('reprocess') }, 'Re-process (R)'),
     h('button', { class: 'btn danger', onclick: () => act('ignored') }, 'Ignore (I)'),
     h('button', { class: 'btn small', disabled: objState.i === 0, onclick: () => { objState.i--; objState.view = 0; renderObjectStep(); } }, '‹ Back'),
@@ -2711,6 +2826,30 @@ function renderObjectStep() {
   v.append(h('div', { class: 'panes' }, h('div', { class: 'stack' }, pane, strip, h('div', { class: 'keys' }, h('kbd', {}, 'A'), ' approve  ', h('kbd', {}, 'R'), ' re-process  ', h('kbd', {}, 'I'), ' ignore  ', h('kbd', {}, '←'), h('kbd', {}, '→'), ' move  ', h('kbd', {}, '1'), '–', h('kbd', {}, '9'), ' photos')),
     h('div', { class: 'stack' }, info, buttons, h('div', { id: 'objmap', class: 'mapbox', style: 'height:340px' }))));
   setTimeout(() => drawObjectMap(ob, all), 0);
+}
+function jumpToObject(x) { objState = { filter: 'all', kind: 'all', i: 0, view: 0 }; objState.i = Math.max(0, objFilterList().indexOf(x)); renderObjectStep(); }
+function aheadPanel(ob) {
+  if (ob.type !== 'warning_sign' || !(ob.values || {}).hazard) return null; const a = aheadOf(ob); if (!a) return null;
+  const box = h('div', { class: 'card stack', style: 'background:var(--sunk)' });
+  if (a.tgt) {
+    const what = a.tgt.label;
+    box.append(h('b', { class: 'small' }, `Checking for the ${what} ahead (200 m, the way you were driving)`));
+    if (a.found.length) for (const f of a.found.slice(0, 3)) box.append(h('div', { class: 'row small' }, h('span', { style: 'flex:1' }, `${KIND_LABEL[f.ob.kind]} found ${f.d} m ahead (${OBJ_STATUS[f.ob.status]}${f.ob.kind === 'calming' ? `, felt on ${f.ob.trips} drive${f.ob.trips === 1 ? '' : 's'}` : ''})`), h('button', { class: 'btn small', onclick: () => jumpToObject(f.ob) }, 'Review it')));
+    else if (a.tgt.obj) box.append(h('div', { class: 'small' }, `Nothing found ahead by the camera${ob.values.hazard === 'hump' ? ' or felt while driving' : ''}.`));
+    box.append(h('div', { class: 'small' }, a.osm.length ? `In OSM: ${a.osm.slice(0, 3).map(x => `${x.label} ${x.d} m ahead`).join(', ')}.` : a.ctxReady ? `OSM has no ${what} within 200 m ahead.` : 'OSM data for the road ahead is still loading.'));
+    if (!a.found.length && !a.osm.length) box.append(h('div', { class: 'small' }, `If there is one, tap a photo below and mark it on the photo (${ob.values.hazard === 'hump' ? 'Traffic calming' : 'the matching type'}).`));
+  }
+  if (a.photos.length) { const strip = h('div', { class: 'thumbs', style: 'grid-template-columns:repeat(auto-fill,minmax(64px,1fr))' });
+    for (const x of a.photos) strip.append(h('button', { 'aria-label': `Photo ${Math.round(x.r.along)} m ahead`, title: `${Math.round(x.r.along)} m ahead`, onclick: () => openDetail(x.p.id) }, h('img', { src: photoURL(x.p), alt: '' })));
+    box.append(h('div', { class: 'muted small' }, 'Photos further along this drive:'), strip); }
+  return box;
+}
+// For a bump or hump: is there a warning sign for it behind (the way traffic approaches)?
+function warnedBy(ob) {
+  if (ob.kind !== 'calming') return null;
+  for (const x of OBJECTS.values()) { if (x.type !== 'warning_sign' || (x.values || {}).hazard !== 'hump') continue; const a = aheadOf(x, 400); if (a && a.found.some(f => f.ob === ob)) { const d = a.found.find(f => f.ob === ob).d;
+    return h('div', { class: 'row small' }, h('span', { style: 'flex:1' }, `A speed hump warning sign ${d} m before this supports it.`), h('button', { class: 'btn small', onclick: () => jumpToObject(x) }, 'See the sign')); } }
+  return null;
 }
 function drawObjectMap(ob, all) {
   if (view !== 'objects' || !$('#objmap')) return;
@@ -2726,6 +2865,7 @@ function drawObjectMap(ob, all) {
     L.circleMarker([o.cam.lat, o.cam.lon], { radius: k === objState.view ? 7 : 5, color: '#fff', weight: 2, fillColor: seen ? '#1f5fae' : '#888', fillOpacity: 1 }).bindTooltip(`Photo ${k + 1}${seen ? '' : ' (not detected)'}`).on('click', () => { objState.view = k; renderObjectStep(); }).addTo(MAP);
     if (seen && x.lat != null) L.circleMarker([x.lat, x.lon], { radius: 3, stroke: false, fillColor: KIND_COLOR[ob.kind] || '#f0f', fillOpacity: 1, interactive: false }).addTo(MAP);
     bounds.push([o.cam.lat, o.cam.lon]); });
+  for (const b of ob.bumps || []) { L.circleMarker([b.lat, b.lon], { radius: 4, color: '#000', weight: 1, fillColor: '#ff6a00', fillOpacity: 1 }).bindTooltip(`Felt at ${b.kmh} km/h${b.pair ? ', both axles' : ''}`).addTo(MAP); bounds.push([b.lat, b.lon]); }
   const col = KIND_COLOR[ob.kind] || '#fff';
   const m = L.marker([ob.lat, ob.lon], { draggable: ob.status !== 'approved', icon: L.divIcon({ className: 'lf-feat', html: `<div style="width:22px;height:22px;border-radius:50%;background:${col};border:3px solid #000;box-shadow:0 0 0 2px #fff"></div>`, iconSize: [22, 22] }) })
     .bindTooltip('Drag to correct the position').addTo(MAP);
@@ -2733,18 +2873,28 @@ function drawObjectMap(ob, all) {
   MAP.fitBounds(bounds, { padding: [24, 24], maxZoom: 20 });
 }
 async function objAction(ob, status) {
-  if (status === 'approved' && !ob.osm) {
+  const keep = SIGN_KEEP[ob.type];
+  if (status === 'approved' && keep) {
+    const miss = keep.fields.find(f => (f.opts || f.num) && !(ob.values || {})[f.k]); if (miss) { toast(miss.label + ': fill this in first.'); return; }
+    for (const ph of OBS.values()) { const a = ph.anns.find(x => x.objId === ob.id); if (a && a.status !== 'uploaded') { a.status = 'rejected'; saveObs(ph); } }
+    ob.keep = true; ob.status = 'approved'; await saveObject(ob); objState.view = 0; if (objFilterList().includes(ob)) objState.i++; renderObjectStep(); return;
+  }
+  ob.keep = false;
+  if (status === 'approved' && (!ob.osm || ob.kind === 'sign')) {
     if (!ob.type) { toast('Choose what it is first.'); $('#f-objtype') && $('#f-objtype').focus(); return; }
     if (ob.type === 'speed_sign' && !(+((ob.values || {}).maxspeed) >= 10)) { toast('Type the number on the sign.'); return; }
   }
+  const cand = ob.views.length ? ob.views : expectedViews(ob);
+  const best = cand.slice().sort((a, b) => Math.abs(a.dist - 12) - Math.abs(b.dist - 12))[0]; const o = best && OBS.get(best.o);
+  if (status === 'approved' && (!ob.osm || ob.kind === 'sign') && !o) { toast('No photo looks at this spot, so it can\'t be marked. Drive past it again with the camera.'); return; }
   ob.status = status;
-  const best = ob.views.slice().sort((a, b) => Math.abs(a.dist - 12) - Math.abs(b.dist - 12))[0]; const o = best && OBS.get(best.o);
   let mark = null; for (const ph of OBS.values()) { const a = ph.anns.find(x => x.objId === ob.id); if (a) { mark = { o: ph, a }; break; } }
-  if (status === 'approved' && ob.osm) { const key = 'n' + ob.osm.id; for (const x of ob.views) { const oo = OBS.get(x.o); if (oo) recordVerdict({ key }, { o: oo }, 'seen'); } }
+  if (status === 'approved' && ob.osm && ob.kind !== 'sign') { const key = 'n' + ob.osm.id; for (const x of cand) { const oo = OBS.get(x.o); if (oo) recordVerdict({ key }, { o: oo }, 'seen'); } }
   else if (status === 'approved' && o) {
-    const values = Object.assign({}, ob.values || {}, ob.type === 'crossing' ? { 'crossing:markings': 'zebra' } : {});
-    if (mark && mark.a.status !== 'uploaded') { Object.assign(mark.a, { preset: ob.type, values, lat: ob.lat, lon: ob.lon, manual: true, status: 'approved' }); resolveAnn(mark.o, mark.a); saveObs(mark.o); }
-    else if (!mark) { const a = { id: newId(), x: best.x, y: best.y, preset: ob.type, values, status: 'approved', lat: ob.lat, lon: ob.lon, manual: true, dist: best.dist, src: 'camera', objId: ob.id }; o.anns.push(a); resolveAnn(o, a); saveObs(o); }
+    const preset = ob.kind === 'calming' ? 'calming' : ob.type;
+    const values = ob.kind === 'calming' ? { traffic_calming: ob.type } : Object.assign({}, ob.values || {}, ob.type === 'crossing' ? { 'crossing:markings': 'zebra' } : {});
+    if (mark && mark.a.status !== 'uploaded') { Object.assign(mark.a, { preset, values, lat: ob.lat, lon: ob.lon, manual: true, status: 'approved' }); resolveAnn(mark.o, mark.a); saveObs(mark.o); }
+    else if (!mark) { const a = { id: newId(), x: best.x, y: best.y, preset, values, status: 'approved', lat: ob.lat, lon: ob.lon, manual: true, dist: best.dist, src: 'camera', objId: ob.id }; o.anns.push(a); resolveAnn(o, a); saveObs(o); }
   } else if (mark && mark.a.status !== 'uploaded') { mark.a.status = status === 'ignored' ? 'rejected' : 'pending'; saveObs(mark.o); }
   await saveObject(ob); objState.view = 0;
   if (objFilterList().includes(ob)) objState.i++;   // stays in this list (e.g. "All"): move on
@@ -2752,7 +2902,7 @@ async function objAction(ob, status) {
 }
 function bulkBar(v) {
   const all = [...OBJECTS.values()].filter(ob => ['new', 'reprocessed'].includes(ob.status));
-  const sure = all.filter(ob => !ob.osm && ob.type && ob.type !== 'speed_sign' && ob.conf >= 0.8 && (ob.trips || 1) >= 2);
+  const sure = all.filter(ob => !ob.osm && ob.type && ob.type !== 'speed_sign' && !SIGN_KEEP[ob.type] && ob.kind !== 'calming' && ob.conf >= 0.8 && (ob.trips || 1) >= 2);
   const osmOk = all.filter(ob => ob.osm && ob.conf >= 0.6);
   const lonely = all.filter(ob => ob.views.length <= 1 && (ob.expected || 0) >= 3);
   if (!sure.length && !osmOk.length && !lonely.length) return;
@@ -2785,7 +2935,7 @@ function renderProcess() {
   step(1, 'Photos', `${photos.length} on this device (${photos.filter(o => o.kind === 'drive').length} from ${trips.length} drive${trips.length === 1 ? '' : 's'})`, h('label', { class: 'btn small' }, 'Import a survey', imp), 'Bring in surveys exported from the phone, or results from another device or a future native processor.');
   step(2, 'Refine drives', unrefined.length ? `${unrefined.length} drive${unrefined.length > 1 ? 's' : ''} not refined yet` : 'All drives refined', unrefined.length ? h('button', { class: 'btn small primary', onclick: async () => { let n = 0; for (const t of unrefined) { const r = await refineTrip(t).catch(() => null); if (r) n += r.n; } toast(`Refined ${n} photos.`); renderProcess(); } }, 'Refine') : null, 'Smooths each drive\'s GPS trail and re-places its photos.');
   step(3, 'Analyse photos', `${analysed.length} of ${photos.length} analysed`, photos.length > analysed.length ? h('button', { class: 'btn small primary', onclick: () => runAnalysis(photos, 'all photos') }, `Analyse ${photos.length - analysed.length}`) : null, `Quality: ${S.visionQuality === 'lite' ? 'Lighter' : 'Best'} (Settings). Finds kerbs, lines, objects; lines each photo up with OSM.`);
-  step(4, 'Find objects', objs.length ? `${objs.length} objects` : 'Not run yet', analysed.length ? h('button', { class: 'btn small primary', onclick: async () => { const n = await buildObjects(); toast(`${n} objects.`); renderProcess(); } }, objs.length ? 'Update' : 'Find objects') : null, 'Groups detections of the same thing across photos and passes, checks which photos should have seen it, and compares with OSM.');
+  step(4, 'Find objects', objs.length ? `${objs.length} objects` : 'Not run yet', analysed.length ? h('button', { class: 'btn small primary', onclick: async () => { const n = await buildObjects(); toast(`${n} objects.`); renderProcess(); } }, objs.length ? 'Update' : 'Find objects') : null, 'Groups detections of the same thing across photos and passes, checks which photos should have seen it, and compares with OSM. Also finds bumps felt while driving (speed humps).');
   step(5, 'Review objects', `${cnt('new') + cnt('reprocessed')} to review · ${cnt('approved')} approved · ${cnt('ignored')} ignored`, objs.length ? h('button', { class: 'btn small primary', onclick: () => { objState = { filter: 'review', kind: 'all', i: 0, view: 0 }; go('objects'); } }, 'Step through') : null, 'Approve, re-process or ignore each one; bulk actions for large batches.');
   step(6, 'Re-process flagged', cnt('reprocess') ? `${cnt('reprocess')} flagged` : 'Nothing flagged', cnt('reprocess') ? h('button', { class: 'btn small primary', onclick: () => runObjectJob('Re-processing', objs.filter(ob => ob.status === 'reprocess'), reprocessObject) }, 'Re-process') : null, 'Looks again, close up, in every photo that should show each object, and fixes the position where the sight lines from different photos cross. They come back to review.');
   step(7, 'Review roads', 'Widths, kerbs, footpaths, lanes', h('button', { class: 'btn small', onclick: () => { survTab = 'roads'; go('surveys'); } }, 'By road'), null);

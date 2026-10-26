@@ -35,13 +35,16 @@ header.top{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-i
 header.top h1{font-size:17px;margin:0;letter-spacing:.01em}
 header.top .srv{margin-left:auto;font-size:12px;padding:3px 8px;border-radius:99px;background:var(--sunk);color:var(--muted)}
 header.top .srv.dev{background:var(--mod);color:#fff}
+.gear{border:0;background:none;color:var(--muted);width:40px;height:40px;display:grid;place-items:center;border-radius:8px;cursor:pointer}
+.gear.on{color:var(--accent);background:var(--sunk)}
 main{overflow:auto;position:relative;-webkit-overflow-scrolling:touch}
 .view{padding:14px max(14px,env(safe-area-inset-right,0px)) 24px max(14px,env(safe-area-inset-left,0px));max-width:1100px;margin:0 auto}
-nav.tabs{display:grid;grid-template-columns:repeat(4,1fr);background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabs{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
 nav.tabs button{background:none;border:0;padding:9px 4px 8px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
 nav.tabs button svg{width:22px;height:22px}
 nav.tabs button.on{color:var(--accent);font-weight:600}
-.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 14px;min-height:42px;cursor:pointer}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 14px;min-height:42px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;max-width:100%}
+.btn.wrap{white-space:normal;text-align:left;justify-content:flex-start;flex:0 1 auto}
 .btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
 .btn.danger{color:var(--bad)}
 .btn.small{min-height:34px;padding:5px 10px;font-size:13px}
@@ -148,7 +151,7 @@ body.cam header.top{display:none}
 .dhead .title b{display:block}
 .panes{display:grid;grid-template-columns:1fr;gap:12px}
 @media (min-width:820px){.panes{grid-template-columns:1fr 1fr}}
-.photo{position:relative;border-radius:12px;overflow:hidden;background:#000;line-height:0;touch-action:manipulation}
+.photo{position:relative;border-radius:12px;overflow:hidden;background:#000;line-height:0;touch-action:manipulation;align-self:start;height:auto}
 .photo img{width:100%;height:auto;display:block}
 .photo svg{position:absolute;inset:0;width:100%;height:100%}
 .mapbox{height:340px;border-radius:12px;border:1px solid var(--line);z-index:0}
@@ -203,6 +206,7 @@ input[type=range]{width:100%}
 <header class="top">
   <h1>LocalityMap</h1>
   <span class="srv" id="srvBadge"></span>
+  <button class="gear" id="btnSettings" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17m10-10 2.1-2.1"/></svg></button>
 </header>
 <main id="main">
   <section id="v-capture" class="view" hidden>
@@ -233,21 +237,25 @@ input[type=range]{width:100%}
   <section id="v-road" class="view" hidden></section>
   <section id="v-area" class="view" hidden></section>
   <section id="v-check" class="view" hidden></section>
+  <section id="v-drivemap" class="view" hidden></section>
+  <section id="v-process" class="view" hidden></section>
+  <section id="v-objects" class="view" hidden></section>
   <section id="v-upload" class="view" hidden></section>
   <section id="v-settings" class="view settings" hidden></section>
 </main>
 <nav class="tabs" id="tabs">
   <button data-v="capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Capture</button>
+  <button data-v="drivemap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg>Drive map</button>
+  <button data-v="process"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg>Process</button>
   <button data-v="surveys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>Review</button>
   <button data-v="upload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v5h16v-5"/></svg>Upload</button>
-  <button data-v="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17m10-10 2.1-2.1"/></svg>Settings</button>
 </nav>
 <dialog id="sheet"></dialog>
 <div id="toast" hidden></div>
 
 <script>
 'use strict';
-const VERSION = '0.5.2';
+const VERSION = '0.6.0';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -297,8 +305,8 @@ function updateBadge() { const b = $('#srvBadge'); b.textContent = srv().label; 
 const store = (() => {
   let p;
   const open = () => p || (p = new Promise((res, rej) => {
-    const r = indexedDB.open('localitymap', 3);
-    r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains('obs')) d.createObjectStore('obs', { keyPath: 'id' }); if (!d.objectStoreNames.contains('cells')) d.createObjectStore('cells', { keyPath: 'key' }); if (!d.objectStoreNames.contains('trails')) d.createObjectStore('trails', { keyPath: 'trip' }); if (!d.objectStoreNames.contains('video')) d.createObjectStore('video', { keyPath: 'key' }); };
+    const r = indexedDB.open('localitymap', 4);
+    r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains('obs')) d.createObjectStore('obs', { keyPath: 'id' }); if (!d.objectStoreNames.contains('cells')) d.createObjectStore('cells', { keyPath: 'key' }); if (!d.objectStoreNames.contains('trails')) d.createObjectStore('trails', { keyPath: 'trip' }); if (!d.objectStoreNames.contains('video')) d.createObjectStore('video', { keyPath: 'key' }); if (!d.objectStoreNames.contains('objects')) d.createObjectStore('objects', { keyPath: 'id' }); };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   }));
   const tx = async (name, mode, fn) => { const d = await open(); return new Promise((res, rej) => { const t = d.transaction(name, mode); const r = fn(t.objectStore(name)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); };
@@ -659,7 +667,7 @@ const PAL = { 'Road': [128, 64, 128], 'Lane Marking - General': [255, 255, 255],
   'Traffic Sign (Front)': [220, 220, 0], 'Car': [0, 0, 142], 'Truck': [0, 0, 70], 'Bus': [0, 60, 100], 'Person': [220, 20, 60], 'Catch Basin': [255, 0, 0], 'Manhole': [0, 255, 0], 'Fire Hydrant': [255, 80, 80], 'Ego Vehicle': [40, 40, 40] };
 const SEG_COLORS = VISTAS.map(n => PAL[n] || [120, 120, 120]);
 let TJS = null, VM = null, vmLoading = null, forceCPU = false;
-async function releaseModel() { const m = VM; VM = null; vmLoading = null; try { m && m.model && m.model.dispose && await m.model.dispose(); } catch {} }
+async function releaseModel() { const m = VM; VM = null; vmLoading = null; if (VW) { try { VW.terminate(); } catch {} VW = null; vwReady = null; const err = new Error('stopped'); for (const p of vwPending.values()) p.rej(err); vwPending.clear(); } try { m && m.model && m.model.dispose && await m.model.dispose(); } catch {} }
 function visionModel(status) {
   if (VM) return Promise.resolve(VM);
   if (!vmLoading) vmLoading = (async () => {
@@ -674,30 +682,10 @@ function visionModel(status) {
   })().catch(e => { vmLoading = null; throw new Error('Could not load the vision model (' + e.message + '). It needs a connection the first time.'); });
   return vmLoading;
 }
-// Per-pixel classes at up to 1024 px wide: mask logits are interpolated to full size, and in Best quality the mirrored photo is run too and averaged.
-async function segmentPhoto(o, opt = {}) {
-  const m = await visionModel(); const bmp = await createImageBitmap(o.photo);
-  const passes = opt.passes || (S.visionQuality === 'lite' ? 1 : 2);
-  // the size MaskFormer was trained at: shortest side 800, longest at most 1333 (smaller when retrying on a struggling device)
-  const maxL = opt.maxLong || 1333, k = Math.min(1, 800 / Math.min(bmp.width, bmp.height), maxL / Math.max(bmp.width, bmp.height));
-  const cw = Math.round(bmp.width * k), ch = Math.round(bmp.height * k);
-  const c = document.createElement('canvas'); c.width = cw; c.height = ch; c.getContext('2d').drawImage(bmp, 0, 0, cw, ch); bmp.close && bmp.close();
-  const runs = [];
-  for (const flip of passes > 1 ? [false, true] : [false]) {
-    let src = c; if (flip) { src = document.createElement('canvas'); src.width = cw; src.height = ch; const g = src.getContext('2d'); g.translate(cw, 0); g.scale(-1, 1); g.drawImage(c, 0, 0); }
-    const inp = await m.proc(await TJS.RawImage.fromCanvas(src)); if (src !== c) freeCanvas(src); const out = await m.model(inp);
-    const [, Q, K1] = out.class_queries_logits.dims, [, , mh, mw] = out.masks_queries_logits.dims, [, , ph, pw] = inp.pixel_values.dims;
-    // the part of the padded input that holds the photo, as the processor reports it
-    let rh = ph, rw = pw; const rs = inp.reshaped_input_sizes && inp.reshaped_input_sizes[0];
-    if (rs && rs.length === 2) { rh = Number(rs[0]); rw = Number(rs[1]); }
-    else if (inp.pixel_mask) { const pm = inp.pixel_mask, [, H2, W2] = pm.dims; let yy = 0, xx = 0; for (let y = 0; y < H2; y++) if (pm.data[y * W2]) yy = y; for (let x = 0; x < W2; x++) if (pm.data[x]) xx = x; rh = yy + 1; rw = xx + 1; }
-    const cl = out.class_queries_logits.data, qs = [];
-    for (let q = 0; q < Q; q++) { let mx = -1e9; for (let j = 0; j < K1; j++) mx = Math.max(mx, cl[q * K1 + j]); let sum = 0; const e = new Float32Array(K1); for (let j = 0; j < K1; j++) { e[j] = Math.exp(cl[q * K1 + j] - mx); sum += e[j]; }
-      const top = []; for (let j = 0; j < K1 - 1; j++) { const pr = e[j] / sum; if (pr > 0.03) top.push(j, pr); } if (top.length) qs.push({ off: q * mh * mw, top }); }
-    runs.push({ flip, qs, ml: Float32Array.from(out.masks_queries_logits.data), mh, mw, vh: rh / ph * mh, vw: rw / pw * mw, K: K1 - 1 });
-    for (const t of [out.class_queries_logits, out.masks_queries_logits, inp.pixel_values, inp.pixel_mask]) try { t && t.dispose && t.dispose(); } catch {}
-  }
-  const W = Math.min(1024, cw), H = Math.round(ch * W / cw); const L = new Uint8Array(W * H).fill(255); const K = runs[0].K; const acc = new Float32Array(K);
+// From the model's per-query class scores and mask logits to one class per pixel at W×H.
+// Shared by the background worker and the main-thread fallback (it is copied into the worker as text).
+function labelFromRuns(runs, W, H, map) {
+  const L = new Uint8Array(W * H).fill(255); const K = runs[0].K; const acc = new Float32Array(K);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     acc.fill(0);
     for (const r of runs) {
@@ -709,11 +697,89 @@ async function segmentPhoto(o, opt = {}) {
         const lg = (ml[b + i00] * (1 - ax) + ml[b + i01] * ax) * (1 - ay) + (ml[b + i10] * (1 - ax) + ml[b + i11] * ax) * ay; if (lg < -4) continue;
         const mk = 1 / (1 + Math.exp(-lg)); const t = q.top; for (let z = 0; z < t.length; z += 2) acc[t[z]] += t[z + 1] * mk; }
     }
-    let bi = 0; for (let j = 1; j < K; j++) if (acc[j] > acc[bi]) bi = j; if (acc[bi] > 0.05) L[y * W + x] = m.map[bi];
+    let bi = 0; for (let j = 1; j < K; j++) if (acc[j] > acc[bi]) bi = j; if (acc[bi] > 0.05) L[y * W + x] = map[bi];
   }
-  const g = document.createElement('canvas'); g.width = W; g.height = H; const gc = g.getContext('2d', { willReadFrequently: true }); gc.drawImage(c, 0, 0, W, H);
-  const rgb = gc.getImageData(0, 0, W, H).data; freeCanvas(g); freeCanvas(c); for (const r of runs) r.ml = null;
-  return { L, rgb, W, H, passes };
+  return L;
+}
+// Turn one model output into the compact form labelFromRuns needs, then free the tensors.
+function runFromOutput(out, inp, flip) {
+  const [, Q, K1] = out.class_queries_logits.dims, [, , mh, mw] = out.masks_queries_logits.dims, [, , ph, pw] = inp.pixel_values.dims;
+  let rh = ph, rw = pw; const rs = inp.reshaped_input_sizes && inp.reshaped_input_sizes[0];
+  if (rs && rs.length === 2) { rh = Number(rs[0]); rw = Number(rs[1]); }
+  else if (inp.pixel_mask) { const pm = inp.pixel_mask, W2 = pm.dims[2], H2 = pm.dims[1]; let yy = 0, xx = 0; for (let y = 0; y < H2; y++) if (pm.data[y * W2]) yy = y; for (let x = 0; x < W2; x++) if (pm.data[x]) xx = x; rh = yy + 1; rw = xx + 1; }
+  const cl = out.class_queries_logits.data, qs = [];
+  for (let q = 0; q < Q; q++) { let mx = -1e9; for (let j = 0; j < K1; j++) mx = Math.max(mx, cl[q * K1 + j]); let sum = 0; const e = new Float32Array(K1); for (let j = 0; j < K1; j++) { e[j] = Math.exp(cl[q * K1 + j] - mx); sum += e[j]; }
+    const top = []; for (let j = 0; j < K1 - 1; j++) { const pr = e[j] / sum; if (pr > 0.03) top.push(j, pr); } if (top.length) qs.push({ off: q * mh * mw, top }); }
+  const run = { flip, qs, ml: Float32Array.from(out.masks_queries_logits.data), mh, mw, vh: rh / ph * mh, vw: rw / pw * mw, K: K1 - 1 };
+  for (const t of [out.class_queries_logits, out.masks_queries_logits, inp.pixel_values, inp.pixel_mask]) try { t && t.dispose && t.dispose(); } catch (e) {}
+  return run;
+}
+// Image prep shared by both paths: optional crop (fractions of the photo), scaled to the size the model was trained at.
+async function prepImage(blob, opt, mkCanvas) {
+  const bmp = await createImageBitmap(blob); let sx = 0, sy = 0, sw = bmp.width, sh = bmp.height;
+  if (opt.crop) { sx = opt.crop[0] * bmp.width; sy = opt.crop[1] * bmp.height; sw = (opt.crop[2] - opt.crop[0]) * bmp.width; sh = (opt.crop[3] - opt.crop[1]) * bmp.height; }
+  const maxL = opt.maxLong || 1333; const k = opt.crop ? Math.min(4, 800 / Math.min(sw, sh), maxL / Math.max(sw, sh)) : Math.min(1, 800 / Math.min(sw, sh), maxL / Math.max(sw, sh));
+  const cw = Math.max(32, Math.round(sw * k)), ch = Math.max(32, Math.round(sh * k)); const c = mkCanvas(cw, ch); c.getContext('2d').drawImage(bmp, sx, sy, sw, sh, 0, 0, cw, ch); if (bmp.close) bmp.close();
+  return { c, cw, ch };
+}
+async function segmentWith(T, proc, model, map, blob, opt, mkCanvas) {
+  const passes = opt.passes || 2; const { c, cw, ch } = await prepImage(blob, opt, mkCanvas); const runs = [];
+  for (const flip of passes > 1 ? [false, true] : [false]) {
+    let src = c; if (flip) { src = mkCanvas(cw, ch); const g = src.getContext('2d'); g.translate(cw, 0); g.scale(-1, 1); g.drawImage(c, 0, 0); }
+    const inp = await proc(await T.RawImage.fromCanvas(src)); if (src !== c) { src.width = 0; src.height = 0; }
+    runs.push(runFromOutput(await model(inp), inp, flip));
+  }
+  const W = opt.crop ? cw : Math.min(1024, cw), H = Math.round(ch * W / cw); const L = labelFromRuns(runs, W, H, map);
+  const g = mkCanvas(W, H); const gc = g.getContext('2d', { willReadFrequently: true }); gc.drawImage(c, 0, 0, W, H); const rgb = gc.getImageData(0, 0, W, H).data;
+  g.width = 0; g.height = 0; c.width = 0; c.height = 0; return { L, rgb, W, H, passes };
+}
+const WORKER_SRC = () => `
+let T = null, proc = null, model = null, map = null;
+${labelFromRuns.toString()}
+${runFromOutput.toString()}
+${prepImage.toString()}
+${segmentWith.toString()}
+const mk = (w, h) => new OffscreenCanvas(w, h);
+self.onmessage = async ev => {
+  const m = ev.data;
+  try {
+    if (m.type === 'init') {
+      T = await import(m.url); let device = self.navigator && navigator.gpu && !m.forceCPU ? 'webgpu' : 'wasm'; const dtype = m.lite ? (device === 'webgpu' ? 'fp16' : 'q8') : 'fp32';
+      proc = await T.AutoProcessor.from_pretrained(m.model);
+      try { model = await T.AutoModel.from_pretrained(m.model, { device, dtype }); } catch (e) { if (device !== 'webgpu') throw e; device = 'wasm'; model = await T.AutoModel.from_pretrained(m.model, { device, dtype: m.lite ? 'q8' : 'fp32' }); }
+      map = new Uint8Array(256).fill(255); for (const [k, nm] of Object.entries(model.config.id2label)) { const i = m.names.indexOf(nm); if (i >= 0) map[+k] = i; }
+      postMessage({ type: 'ready', id: m.id, dev: device === 'webgpu' ? 'GPU' : 'CPU (slow)', dtype }); return;
+    }
+    if (m.type === 'segment') {
+      const r = await segmentWith(T, proc, model, map, new Blob([m.buf], { type: 'image/jpeg' }), m.opt, mk);
+      postMessage({ type: 'result', id: m.id, L: r.L, rgb: r.rgb, W: r.W, H: r.H, passes: r.passes }, [r.L.buffer, r.rgb.buffer]); return;
+    }
+  } catch (e) { postMessage({ type: 'error', id: m.id, message: String(e && e.message || e) }); }
+};`;
+let VW = null, vwReady = null, vwSeq = 0; const vwPending = new Map();
+function vwCall(type, data, transfer) { const id = ++vwSeq; return new Promise((res, rej) => { vwPending.set(id, { res, rej }); VW.postMessage({ type, id, ...data }, transfer || []); }); }
+function visionWorker(status) {
+  if (vwReady) return vwReady;
+  vwReady = (async () => {
+    if (status) status(`Loading the street-scene model (${S.visionQuality === 'lite' ? 83 : 165} MB, first time only)…`);
+    const w = new Worker(URL.createObjectURL(new Blob([WORKER_SRC()], { type: 'text/javascript' })), { type: 'module' }); VW = w;
+    w.onmessage = ev => { const m = ev.data, p = vwPending.get(m.id); if (!p) return; vwPending.delete(m.id); if (m.type === 'error') p.rej(new Error(m.message)); else p.res(m); };
+    w.onerror = ev => { const err = new Error('the vision worker stopped (' + (ev.message || 'unknown') + ')'); for (const p of vwPending.values()) p.rej(err); vwPending.clear(); };
+    const r = await vwCall('init', { url: TJS_URL, model: VIS_MODEL, lite: S.visionQuality === 'lite', forceCPU, names: VISTAS });
+    VM = { dev: r.dev, dtype: r.dtype, worker: true }; return VM;
+  })().catch(e => { try { if (VW) VW.terminate(); } catch (e2) {} VW = null; vwReady = null; throw e; });
+  return vwReady;
+}
+// Ready a model: a background worker where the browser allows it, otherwise on the page itself.
+let useWorker = typeof Worker !== 'undefined' && typeof OffscreenCanvas !== 'undefined';
+async function visionReady(status) {
+  if (useWorker) { try { return await visionWorker(status); } catch (e) { console.warn('worker unavailable, using the page', e); useWorker = false; } }
+  return visionModel(status);
+}
+async function segmentPhoto(o, opt = {}) {
+  const o2 = { passes: opt.passes || (S.visionQuality === 'lite' ? 1 : 2), maxLong: opt.maxLong || 1333, crop: opt.crop || null };
+  if (useWorker && VW) { const buf = await o.photo.arrayBuffer(); const r = await vwCall('segment', { buf, opt: o2 }, [buf]); return { L: new Uint8Array(r.L), rgb: new Uint8ClampedArray(r.rgb), W: r.W, H: r.H, passes: r.passes }; }
+  const m = await visionModel(); return segmentWith(TJS, m.proc, m.model, m.map, o.photo, o2, (w, h2) => { const c = document.createElement('canvas'); c.width = w; c.height = h2; return c; });
 }
 const rle = L => { const out = []; let v = L[0], n = 0; for (let i = 0; i < L.length; i++) { if (L[i] === v) n++; else { out.push(v, n); v = L[i]; n = 1; } } out.push(v, n); return out; };
 function segImageURL(vis) {
@@ -726,7 +792,7 @@ async function analysePhoto(o, opt) {
   const pose0 = { adj: o.cam.adj || 0, tilt: o.cam.tilt || 0, lat: o.cam.lat, lon: o.cam.lon, shift: o.cam.shift || 0 };
   const C0 = { ...obsCam(o), w: seg.W, h: seg.H };
   const res = analyseScene(seg.L, seg.rgb, seg.W, seg.H, C0);
-  o.vision = { at: new Date().toISOString(), model: VIS_MODEL + ' ' + VM.dtype + (seg.passes > 1 ? ' x2' : ''), W: seg.W, H: seg.H, rle: rle(seg.L), res, pose0, v: 2 };
+  o.vision = { at: new Date().toISOString(), model: VIS_MODEL + ' ' + (VM ? VM.dtype : '') + (seg.passes > 1 ? ' x2' : ''), W: seg.W, H: seg.H, rle: rle(seg.L), res, pose0, v: 2 };
   if (S.autoAlign) autoAlign(o);
   o.anns.forEach(a => resolveAnn(o, a)); roadCache.clear(); saveObs(o);
   return o.vision;
@@ -769,7 +835,7 @@ async function runAnalysis(list, label) {
   Object.assign(vjob, { running: true, cancel: false, done: 0, ok: 0, failed: 0, lighter: 0, total: todo.length, label, status: '', lastError: '' }); vNotify();
   let opt = null;   // null = the quality chosen in Settings; set to lighter options once the device has struggled
   try {
-    await withTimeout(visionModel(t => { vjob.status = t; vNotify(); }), 300000);
+    await withTimeout(visionReady(t => { vjob.status = t; vNotify(); }), 300000);
     for (const o of todo) {
       if (vjob.cancel) break;
       vjob.status = `${VM.dev}${opt ? ' · lighter' : ''} · photo ${vjob.done + 1} of ${vjob.total}`; vNotify();
@@ -778,7 +844,7 @@ async function runAnalysis(list, label) {
       for (let attempt = 0; attempt < 2 && !okNow; attempt++) {
         try { await withTimeout(analysePhoto(o, opt || undefined), opt ? 120000 : 90000); okNow = true; if (opt) vjob.lighter++; }
         catch (e) { vjob.lastError = e.message || String(e); console.warn('analysis failed', o.id, e);
-          if (/stopped responding|device|lost|memory/i.test(vjob.lastError) && VM && VM.dev === 'GPU') { forceCPU = true; await releaseModel(); vjob.status = 'Graphics chip stopped responding: continuing on the processor (slower)…'; vNotify(); try { await withTimeout(visionModel(), 300000); } catch {} }
+          if (/stopped responding|worker stopped|device|lost|memory/i.test(vjob.lastError)) { if (VM && VM.dev === 'GPU') forceCPU = true; await releaseModel(); vjob.status = forceCPU ? 'Graphics chip stopped responding: continuing on the processor (slower)…' : 'Restarting the vision model…'; vNotify(); try { await withTimeout(visionReady(), 300000); } catch {} }
           if (!opt) { opt = { passes: 1, maxLong: 1024 }; vjob.status = 'Running short of memory: switching to lighter analysis…'; vNotify(); }
           else break; }
         await sleep(30);
@@ -861,7 +927,7 @@ function visionSummary(x) {
     c.photos = new Set(c.views.map(v => v.o.id)).size; c.trips = new Set(c.views.map(v => v.o.trip || v.o.id)).size; c.best = c.views.slice().sort((a, b) => Math.abs(a.dist - 12) - Math.abs(b.dist - 12))[0];
     c.height = med(c.views.map(v => v.height).filter(Boolean)); c.key = c.kind + ':' + c.lat.toFixed(5) + ':' + c.lon.toFixed(5);
     const pr = mkProj(c.lat, c.lon);
-    if (ctx) for (const [id, nd] of Object.entries(ctx.nodes)) { const l = poiLabel(nd.tags); if (l && Math.hypot(...pr.fwd(nd.lat, nd.lon)) < 5) { c.osm = { id, label: l }; break; } }
+    if (ctx) for (const [id, nd] of Object.entries(ctx.nodes)) { const l = poiLabel(nd.tags); if (l && osmKindOk(c.kind, nd.tags) && Math.hypot(...pr.fwd(nd.lat, nd.lon)) < 5) { c.osm = { id, label: l }; break; } }
     c.taken = [...OBS.values()].some(o => o.anns.some(a => a.lat != null && a.status !== 'rejected' && Math.hypot(...mkProj(c.lat, c.lon).fwd(a.lat, a.lon)) < 4));
     c.ignored = Object.keys(ignored).some(k => { const [kd, la, lo] = k.split(':'); return kd === c.kind && Math.hypot(...pr.fwd(+la, +lo)) < 4; });
     const mv = loadLS('lm.clusterPos', []).find(m2 => m2.kind === c.kind && Math.hypot(...pr.fwd(m2.lat0, m2.lon0)) < 5);
@@ -1612,12 +1678,16 @@ let view = 'surveys', current = null, survTab = 'photos';
 function go(v) {
   view = v; document.body.classList.toggle('cam', v === 'capture'); if (v !== 'capture' && toolsOpen) toggleTools(false);
   for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'v-' + v;
-  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.v === v || (['detail', 'road', 'area', 'check'].includes(v) && b.dataset.v === 'surveys'));
+  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.v === v || (['detail', 'road', 'area', 'check', 'objects'].includes(v) && b.dataset.v === 'surveys'));
+  $('#btnSettings').classList.toggle('on', v === 'settings'); clearInterval(dmTimer);
   if (v === 'capture') { if (sensors.started) startCamera(); renderCaptureUI(); } else if (!drive.on) stopCamera();
   if (MAP) { MAP.remove(); MAP = null; }
   if (v === 'surveys') renderSurveys();
   if (v === 'upload') renderUpload();
   if (v === 'settings') renderSettings();
+  if (v === 'drivemap') renderDriveMap();
+  if (v === 'process') renderProcess();
+  if (v === 'objects') renderObjectStep();
   $('#main').scrollTop = 0;
 }
 function counts(list) { const c = { pending: 0, approved: 0, rejected: 0, uploaded: 0, merged: 0 }; list.forEach(a => c[a.status] = (c[a.status] || 0) + 1); return c; }
@@ -1632,11 +1702,11 @@ function thumbGrid(list) {
 function renderSurveys() {
   const v = $('#v-surveys'); v.innerHTML = '';
   const seg = h('div', { class: 'seg', role: 'tablist' });
-  for (const [k, l] of [['photos', 'Photos'], ['roads', 'By road'], ['areas', 'By area'], ['passes', 'Passes']]) seg.append(h('button', { class: survTab === k ? 'on' : '', role: 'tab', onclick: () => { survTab = k; renderSurveys(); } }, l));
+  for (const [k, l] of [['photos', 'Photos'], ['objects', 'Objects'], ['roads', 'By road'], ['areas', 'By area'], ['passes', 'Passes']]) seg.append(h('button', { class: survTab === k ? 'on' : '', role: 'tab', onclick: () => { survTab = k; renderSurveys(); } }, l));
   const imp = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ''; if (f) importSurvey(f).catch(err => toast('Import failed: ' + err.message, 7000)); } });
   v.append(h('div', { class: 'row', style: 'justify-content:space-between;align-items:flex-start' }, seg, h('label', { class: 'btn small' }, 'Import from another device', imp)));
   if (!OBS.size) { v.append(h('div', { class: 'card empty' }, h('p', {}, 'No photos yet.'), h('button', { class: 'btn primary', onclick: () => go('capture') }, 'Start capturing'))); return; }
-  ({ photos: renderPhotos, roads: renderRoads, areas: renderAreas, passes: renderPasses })[survTab](v);
+  ({ photos: renderPhotos, objects: renderObjectsTab, roads: renderRoads, areas: renderAreas, passes: renderPasses })[survTab](v);
 }
 function renderPhotos(v) {
   const list = [...OBS.values()].sort((a, b) => b.created.localeCompare(a.created));
@@ -2102,7 +2172,7 @@ function renderRoad() {
 
   v.append(h('h3', {}, 'All marks on this road'));
   const pend = x.marks.filter(m => m.a.status === 'pending');
-  if (pend.length) v.append(h('button', { class: 'btn small primary', style: 'margin-bottom:8px', onclick: () => { pend.forEach(m => { if (!annWarnings(m.o, m.a).some(w => w.startsWith('No matching') || w.startsWith('Nothing'))) { m.a.status = 'approved'; saveObs(m.o); } }); renderRoad(); } }, `Approve ${pend.length} pending (skips ones without a target)`));
+  if (pend.length) v.append(h('button', { class: 'btn small primary wrap', style: 'margin-bottom:8px', onclick: () => { pend.forEach(m => { if (!annWarnings(m.o, m.a).some(w => w.startsWith('No matching') || w.startsWith('Nothing'))) { m.a.status = 'approved'; saveObs(m.o); } }); renderRoad(); } }, `Approve ${pend.length} pending (skips ones without a target)`));
   const list = h('div', { class: 'stack' });
   x.marks.forEach((m, i) => list.append(changeCard(m.o, m.a, i + 1, renderRoad)));
   if (!x.marks.length) list.append(h('p', { class: 'muted' }, 'No marks yet.'));
@@ -2189,7 +2259,7 @@ function visionCard(x, values, smIn) {
   if (sm.lanes) { row('Lanes from the lines', String(sm.lanes.value), `${sm.lanes.count} photos · OSM: ${t.lanes || 'not set'}`); if (sm.lanes.count >= 3) sug.lanes = String(sm.lanes.value); }
   if (sm.wires >= 0.2) row('Overhead wires', `in ${Math.round(sm.wires * 100)}% of photos`, 'draw power or phone lines between the poles in iD or JOSM');
   const useful = Object.entries(sug).filter(([k, v]) => String(t[k] ?? '') !== v);
-  if (useful.length) card.append(h('button', { class: 'btn small primary', onclick: () => { Object.assign(values, Object.fromEntries(useful)); applyRoadValues(x, values); } }, 'Use in road details: ' + useful.map(([k, v]) => k + '=' + v).join(', ')));
+  if (useful.length) card.append(h('button', { class: 'btn small primary wrap', onclick: () => { Object.assign(values, Object.fromEntries(useful)); applyRoadValues(x, values); } }, 'Use in road details: ' + useful.map(([k, v]) => k + '=' + v).join(', ')));
   const cl = sm.clusters.filter(c => !c.osm && !c.taken), known = sm.clusters.filter(c => c.osm);
   if (known.length) card.append(h('div', { class: 'small' }, h('b', {}, 'Confirms OSM: '), Object.entries(known.reduce((a, c) => (a[c.osm.label] = (a[c.osm.label] || 0) + 1, a), {})).map(([l, k2]) => `${k2} ${l.toLowerCase()}${k2 > 1 ? 's' : ''}`).join(', ')));
   if (cl.length) {
@@ -2237,7 +2307,7 @@ function renderArea() {
   v.append(h('div', { class: 'dhead' }, h('button', { class: 'btn small', onclick: () => { survTab = 'areas'; go('surveys'); } }, '← Areas'), h('div', { class: 'title' }, h('b', {}, x.label), h('span', { class: 'muted small' }, `${x.photos.length} photos · ${x.marks.length} marks`)),
     h('button', { class: 'btn small', onclick: () => exportData(x.photos) }, 'Export')));
   const pend = x.marks.filter(m => m.a.status === 'pending');
-  if (pend.length) v.append(h('button', { class: 'btn small primary', onclick: () => { pend.forEach(m => { if (!annWarnings(m.o, m.a).some(w => w.startsWith('No matching') || w.startsWith('Nothing'))) { m.a.status = 'approved'; saveObs(m.o); } }); renderArea(); } }, `Approve ${pend.length} pending (skips ones without a target)`));
+  if (pend.length) v.append(h('button', { class: 'btn small primary wrap', onclick: () => { pend.forEach(m => { if (!annWarnings(m.o, m.a).some(w => w.startsWith('No matching') || w.startsWith('Nothing'))) { m.a.status = 'approved'; saveObs(m.o); } }); renderArea(); } }, `Approve ${pend.length} pending (skips ones without a target)`));
   const list = h('div', { class: 'stack', style: 'margin-top:10px' });
   x.marks.forEach((m, i) => list.append(changeCard(m.o, m.a, i + 1, renderArea)));
   if (!x.marks.length) list.append(h('p', { class: 'muted' }, 'No marks in this area yet. Open a photo to add some.'));
@@ -2403,15 +2473,383 @@ async function importSurvey(file) {
   }
   for (const [k, list] of Object.entries(js.checks || {})) { const mine = CHECKS[k] || []; const by = new Map(mine.map(x => [x.o, x])); for (const x of list) { const m = by.get(x.o); if (!m || x.at > m.at) by.set(x.o, x); } CHECKS[k] = [...by.values()]; }
   saveChecks(); saveLS('lm.trips', Object.assign(loadLS('lm.trips', {}), js.trips || {}));
+  for (const ob of js.objects || []) { const ex = OBJECTS.get(ob.id); if (!ex || (ob.updated || 0) > (ex.updated || 0)) { OBJECTS.set(ob.id, ob); await store.put('objects', ob).catch(() => {}); } }
   const tf = zip.file('trails.json'); if (tf) for (const tr of JSON.parse(await tf.async('string'))) { const mine = await store.get('trails', tr.trip).catch(() => null); if (!mine || mine.fixes.length < tr.fixes.length) await store.put('trails', tr).catch(() => {}); }
   roadCache.clear(); toast(`Imported: ${added} new photos, ${merged} updated${skipped ? `, ${skipped} skipped (photos not in this export and not on this device)` : ''}.`, 7000);
   go('surveys');
 }
 function mergeObs(ex, rec) {
   if ((rec.updated || 0) > (ex.updated || 0)) { ex.cam = rec.cam; ex.hfovLong = rec.hfovLong; }
+  if (rec.vision && (!ex.vision || (rec.vision.at || '') > (ex.vision.at || ''))) ex.vision = rec.vision;
   const byId = new Map(ex.anns.map(a => [a.id, a]));
   for (const a of rec.anns || []) { const e = byId.get(a.id); if (!e) ex.anns.push(a); else if ((a.updated || 0) > (e.updated || 0)) Object.assign(e, a); }
   ex.updated = Math.max(ex.updated || 0, rec.updated || 0);
+}
+
+/* ================= objects: one record per physical thing, across all photos ================= */
+const OBJECTS = new Map();
+// Does an OSM node plausibly describe the same kind of thing the camera saw?
+function osmKindOk(kind, t) {
+  const hw = t.highway, pw = t.power, am = t.amenity, mm = t.man_made;
+  switch (kind) {
+    case 'lamp': return hw === 'street_lamp';
+    case 'utility': case 'pole': return pw === 'pole' || pw === 'tower' || mm === 'utility_pole' || t.utility != null || hw === 'street_lamp';
+    case 'sign': return !!(t.traffic_sign || hw === 'stop' || hw === 'give_way' || hw === 'speed_camera');
+    case 'signal': return hw === 'traffic_signals' || t.crossing === 'traffic_signals';
+    case 'hydrant': return t.emergency === 'fire_hydrant';
+    case 'drain': return mm === 'manhole' || t.manhole != null || t.drain != null || mm === 'storm_drain';
+    case 'manhole': return mm === 'manhole';
+    case 'cabinet': return mm === 'street_cabinet' || pw === 'substation';
+    case 'bench': return am === 'bench' || t.leisure === 'picnic_table';
+    case 'bin': return am === 'waste_basket' || am === 'recycling';
+    case 'mailbox': return am === 'post_box';
+    case 'crosswalk': return hw === 'crossing' || t.crossing != null;
+    case 'vegetation': return t.natural === 'tree';
+    default: return true;
+  }
+}
+const OBJ_HEIGHT = { lamp: 8, utility: 9, sign: 3, signal: 5, hydrant: 0.9, drain: 0.3, cabinet: 1.4, bench: 1, bin: 1, mailbox: 1.3, crosswalk: 0.2 };
+const OBJ_CLASSES = { lamp: ['Pole', 'Utility Pole', 'Street Light'], utility: ['Utility Pole', 'Pole'], sign: ['Traffic Sign (Front)'], signal: ['Traffic Light'], hydrant: ['Fire Hydrant'], drain: ['Catch Basin'],
+  cabinet: ['Junction Box'], bench: ['Bench'], bin: ['Trash Can'], mailbox: ['Mailbox'], crosswalk: ['Lane Marking - Crosswalk', 'Crosswalk - Plain'] };
+const saveObject = ob => { ob.updated = Date.now(); return store.put('objects', ob).catch(e => toast('Could not save: ' + e.message)); };
+const llDist = (a, b) => Math.hypot(...mkProj(a.lat, a.lon).fwd(b.lat, b.lon));
+// Photos where an object at (lat, lon) of a given height ought to be visible, with where it should appear.
+function expectedViews(ob) {
+  const out = []; const ht = OBJ_HEIGHT[ob.kind] || 3;
+  for (const o of OBS.values()) {
+    const [e, n] = mkProj(o.cam.lat, o.cam.lon).fwd(ob.lat, ob.lon); const d = Math.hypot(e, n); if (d < 3 || d > 40) continue;
+    const C = obsCam(o); const b = toImg(C, [e, n, -C.height]), t = toImg(C, [e, n, -C.height + ht]); if (!b || !t) continue;
+    const x = b[0] / C.w, y = b[1] / C.h; if (x < 0.02 || x > 0.98 || t[1] / C.h > 0.98 || y < 0.05) continue;
+    out.push({ o: o.id, x, y: Math.min(1, y), top: Math.max(0, t[1] / C.h), dist: d });
+  }
+  return out;
+}
+function scoreObject(ob) {
+  const exp = expectedViews(ob); ob.expected = exp.length; const seen = new Set(ob.views.map(v => v.o)).size;
+  const pts = ob.views.map(v => v.lat != null ? mkProj(ob.lat, ob.lon).fwd(v.lat, v.lon) : null).filter(Boolean); const spread = pts.length ? Math.sqrt(pts.reduce((a, p) => a + p[0] * p[0] + p[1] * p[1], 0) / pts.length) : 0;
+  ob.trips = new Set(ob.views.map(v => (OBS.get(v.o) || {}).trip || v.o)).size; ob.spread = Math.round(spread * 10) / 10;
+  const hit = exp.length ? Math.min(1, seen / exp.length) : (seen >= 2 ? 0.7 : 0.4);
+  ob.conf = Math.round(hit * (ob.trips >= 2 ? 1 : seen >= 2 ? 0.8 : 0.55) * (spread <= 1.5 ? 1 : Math.max(0.3, 1.5 / spread)) * 100) / 100;
+  const ctx = OBS.get(ob.views[0] && ob.views[0].o) ? osmOf(OBS.get(ob.views[0].o)) : null; ob.osm = null;
+  if (ctx) { let bd = 5; for (const [id, nd] of Object.entries(ctx.nodes)) { const l = poiLabel(nd.tags); if (!l || !osmKindOk(ob.kind, nd.tags)) continue; const d = llDist(ob, nd); if (d < bd) { bd = d; ob.osm = { id, label: l, tags: nd.tags, lat: nd.lat, lon: nd.lon }; } } }
+}
+// Group detections from all analysed photos into objects. Reviewed objects keep their position and decision.
+async function buildObjects() {
+  const dets = [];
+  for (const o of OBS.values()) {
+    const v = o.vision && o.vision.v === 2 && o.vision.res; if (!v) continue; const C = obsCam(o), pr = mkProj(o.cam.lat, o.cam.lon);
+    for (const ob of v.objects) {
+      if (!KIND_PRESETS[ob.kind] || !ob.ground) continue; if ((ob.kind === 'utility' || ob.kind === 'pole') && (ob.carries || []).includes('lamp')) continue;
+      const g = groundOf(C, ob.x, ob.y); if (!g) continue; const d = Math.hypot(...g); if (d > 35) continue; const ll = pr.inv(g[0], g[1]);
+      dets.push({ kind: ob.kind, lat: ll.lat, lon: ll.lon, o: o.id, x: ob.x, y: ob.y, box: ob.box, dist: Math.round(d * 10) / 10, height: ob.height });
+    }
+  }
+  const all = [...OBJECTS.values()]; for (const ob of all) if (!ob.refined) ob.views = [];
+  for (const dt of dets) {
+    let best = null, bd = 1e9; for (const ob of all) { if (ob.kind !== dt.kind) continue; const d = llDist(ob, dt); if (d < (dt.kind === 'crosswalk' ? 6 : 3.5) && d < bd) { best = ob; bd = d; } }
+    if (!best) { best = { id: 'obj-' + newId(), kind: dt.kind, lat: dt.lat, lon: dt.lon, views: [], status: 'new', created: Date.now() }; all.push(best); OBJECTS.set(best.id, best); }
+    const same = best.views.find(v => v.o === dt.o); if (same) { if (dt.dist < same.dist) Object.assign(same, dt); } else best.views.push(dt);
+    if (best.status === 'new' && !best.moved && !best.refined) { best.lat = best.views.reduce((a, v) => a + v.lat, 0) / best.views.length; best.lon = best.views.reduce((a, v) => a + v.lon, 0) / best.views.length; }
+  }
+  let n = 0;
+  for (const ob of all) {
+    if (!ob.views.length && ob.status === 'new') { OBJECTS.delete(ob.id); await store.del('objects', ob.id).catch(() => {}); continue; }
+    const hs = ob.views.map(v => v.height).filter(Boolean).sort((a, b) => a - b); ob.height = hs.length ? hs[hs.length >> 1] : null;
+    if (!ob.type) ob.type = suggestType(ob);
+    scoreObject(ob); await saveObject(ob); n++;
+  }
+  return n;
+}
+function suggestType(ob) {
+  if (ob.kind === 'utility') { const wires = ob.views.some(v => { const o = OBS.get(v.o); return o && o.vision && o.vision.res.wires && o.vision.res.wires.wires; }); return wires ? 'power_pole' : 'utility_pole'; }
+  if (ob.kind === 'sign') return null;
+  return (KIND_PRESETS[ob.kind] || [[null]])[0][0];
+}
+// ---- deep re-processing: look again in every photo that should show it, then intersect the sight lines
+function triangulate(rays) {   // rays: [{c:[e,n], d:[dx,dy] unit}] → least-squares point, residuals
+  let a = 0, b = 0, c2 = 0, bx = 0, by = 0;
+  for (const r of rays) { const [dx, dy] = r.d; const m00 = 1 - dx * dx, m01 = -dx * dy, m11 = 1 - dy * dy; a += m00; b += m01; c2 += m11; bx += m00 * r.c[0] + m01 * r.c[1]; by += m01 * r.c[0] + m11 * r.c[1]; }
+  const det = a * c2 - b * b; if (Math.abs(det) < 1e-6) return null;
+  const p = [(c2 * bx - b * by) / det, (a * by - b * bx) / det];
+  const res = rays.map(r => { const vx = p[0] - r.c[0], vy = p[1] - r.c[1]; const along = vx * r.d[0] + vy * r.d[1]; return along < 0 ? Infinity : Math.abs(vx * r.d[1] - vy * r.d[0]); });
+  return { p, res };
+}
+function robustTriangulate(rays) {
+  let rs = rays.slice(), t = null;
+  for (let it = 0; it < 4 && rs.length >= 2; it++) {
+    t = triangulate(rs); if (!t) return null; const worst = t.res.reduce((m, r, i) => r > t.res[m] ? i : m, 0);
+    if (t.res[worst] <= 1.5) break; rs = rs.filter((_, i) => i !== worst);
+  }
+  if (!t || rs.length < 2) return null;
+  const angs = rs.map(r => Math.atan2(r.d[0], r.d[1])); let spread = 0; for (const a1 of angs) for (const a2 of angs) spread = Math.max(spread, Math.abs(((a1 - a2 + 3 * Math.PI) % (2 * Math.PI)) - Math.PI));
+  return { p: t.p, used: rs.length, rms: Math.sqrt(t.res.filter(Number.isFinite).reduce((s2, r) => s2 + r * r, 0) / rs.length), spreadDeg: spread * R2D };
+}
+function blobsOf(L, W, H, ids) {
+  const want = new Set(ids), seen = new Uint8Array(W * H), out = [];
+  for (let i = 0; i < W * H; i++) { if (seen[i] || !want.has(L[i])) continue; const st = [i]; seen[i] = 1; let n = 0, x0 = W, x1 = 0, y0 = H, y1 = 0, bx = 0, bc = 0;
+    while (st.length) { const j = st.pop(); n++; const x = j % W, y = (j / W) | 0; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); if (y > y1) { y1 = y; bx = 0; bc = 0; } if (y === y1) { bx += x; bc++; }
+      for (const k of [j - 1, j + 1, j - W, j + W]) if (k >= 0 && k < W * H && !seen[k] && want.has(L[k]) && Math.abs((k % W) - x) <= 1) { seen[k] = 1; st.push(k); } }
+    if (n >= 8) out.push({ n, x0, x1, y0, y1, bx: bx / bc }); }
+  return out;
+}
+async function reprocessObject(ob) {
+  const cands = expectedViews(ob).sort((a, b) => a.dist - b.dist); const byTrip = new Map();
+  for (const c of cands) { const t = (OBS.get(c.o) || {}).trip || c.o; if (!byTrip.has(t)) byTrip.set(t, []); byTrip.get(t).push(c); }
+  const pick = []; for (let r = 0; pick.length < 10 && r < 6; r++) for (const list of byTrip.values()) if (list[r] && pick.length < 10) pick.push(list[r]);
+  const ids = (OBJ_CLASSES[ob.kind] || []).map(n => V[n]); const rays = [], gnd = [], views = []; let looked = 0;
+  for (const c of pick) {
+    const o = OBS.get(c.o); if (!o) continue; looked++;
+    const C = obsCam(o); const wM = Math.max(3, (OBJ_HEIGHT[ob.kind] || 3) * 0.6); const half = Math.atan2(wM, c.dist) / (2 * Math.atan(C.fov.th)) ;
+    const crop = [Math.max(0, c.x - half - 0.02), Math.max(0, c.top - 0.06), Math.min(1, c.x + half + 0.02), Math.min(1, c.y + 0.08)];
+    if (crop[2] - crop[0] < 0.03 || crop[3] - crop[1] < 0.03) continue;
+    let seg; try { seg = await withTimeout(segmentPhoto(o, { crop, passes: S.visionQuality === 'lite' ? 1 : 2 }), 90000); } catch (e) { console.warn('reprocess view failed', e); continue; }
+    const bl = blobsOf(seg.L, seg.W, seg.H, ids); if (!bl.length) { views.push({ o: o.id, missed: true, x: c.x, y: c.y, dist: c.dist }); continue; }
+    // the blob whose foot is nearest where the object should stand
+    const ex = (c.x - crop[0]) / (crop[2] - crop[0]) * seg.W, ey = (c.y - crop[1]) / (crop[3] - crop[1]) * seg.H;
+    const b = bl.sort((p1, p2) => Math.hypot(p1.bx - ex, (p1.y1 - ey) * 0.5) - Math.hypot(p2.bx - ex, (p2.y1 - ey) * 0.5))[0];
+    const fx = crop[0] + (b.bx + 0.5) / seg.W * (crop[2] - crop[0]), fy = crop[1] + (b.y1 + 1) / seg.H * (crop[3] - crop[1]);
+    const bx2 = crop[0] + b.x0 / seg.W * (crop[2] - crop[0]), bx3 = crop[0] + (b.x1 + 1) / seg.W * (crop[2] - crop[0]), by0 = crop[1] + b.y0 / seg.H * (crop[3] - crop[1]);
+    const d = rayDir(C, fx, fy); const dh = Math.hypot(d[0], d[1]); const pr = mkProj(o.cam.lat, o.cam.lon);
+    rays.push({ c: mkProj(ob.lat, ob.lon).fwd(o.cam.lat, o.cam.lon), d: [d[0] / dh, d[1] / dh], o: o.id });
+    const g = b.y1 < seg.H - 2 ? groundOf(C, fx, fy) : null; let ll = null; if (g && Math.hypot(...g) < 45) { ll = pr.inv(g[0], g[1]); gnd.push(mkProj(ob.lat, ob.lon).fwd(ll.lat, ll.lon)); }
+    views.push({ o: o.id, x: fx, y: fy, box: [bx2, by0, bx3, fy], dist: c.dist, lat: ll && ll.lat, lon: ll && ll.lon, refined: true });
+  }
+  const tri = rays.length >= 2 ? robustTriangulate(rays) : null; const before = { lat: ob.lat, lon: ob.lon }; let how;
+  const med = arr => arr.slice().sort((a, b) => a - b)[arr.length >> 1];
+  const gp = gnd.length ? [med(gnd.map(p => p[0])), med(gnd.map(p => p[1]))] : null;
+  let p = null;
+  if (tri && tri.spreadDeg >= 6 && tri.rms < 1.2) { p = gp && Math.hypot(tri.p[0] - gp[0], tri.p[1] - gp[1]) < 3 ? [tri.p[0] * 0.7 + gp[0] * 0.3, tri.p[1] * 0.7 + gp[1] * 0.3] : tri.p; how = `sight lines from ${tri.used} photos cross within ${tri.rms.toFixed(1)} m (${Math.round(tri.spreadDeg)}° apart)`; }
+  else if (gp) { p = gp; how = tri ? `sight lines too parallel to cross reliably (${Math.round(tri.spreadDeg)}°); used where it meets the ground in ${gnd.length} photo${gnd.length > 1 ? 's' : ''}` : `placed where it meets the ground in ${gnd.length} photo${gnd.length > 1 ? 's' : ''}`; }
+  const found = views.filter(v => !v.missed).length;
+  if (p) { const ll = mkProj(ob.lat, ob.lon).inv(p[0], p[1]); ob.lat = ll.lat; ob.lon = ll.lon; }
+  ob.views = views.filter(v => !v.missed); ob.missed = views.filter(v => v.missed).map(v => v.o); ob.refined = true; ob.status = 'reprocessed';
+  scoreObject(ob); if (looked) ob.conf = Math.round(Math.min(1, ob.conf, found / looked + (tri && tri.used >= 3 ? 0.1 : 0)) * 100) / 100;
+  ob.notes = [`Re-processed: found in ${found} of ${looked} photos that should show it${found ? '' : ' (probably not there, or hidden)'}.`, how ? `Position: ${how}.` : 'Position unchanged.', p ? `Moved ${llDist(before, ob).toFixed(1)} m.` : ''].filter(Boolean);
+  await saveObject(ob);
+}
+// ---- one background job at a time for long batches (analysis has its own runner above)
+async function runObjectJob(label, list, fn) {
+  if (vjob.running) { toast('Busy with ' + vjob.label + '. Wait, or press Stop.'); return; }
+  Object.assign(vjob, { running: true, cancel: false, done: 0, ok: 0, failed: 0, lighter: 0, total: list.length, label, status: '', lastError: '' }); vNotify();
+  try { await withTimeout(visionReady(t => { vjob.status = t; vNotify(); }), 300000);
+    for (const item of list) { if (vjob.cancel) break; vjob.status = `${VM ? VM.dev : ''} · ${vjob.done + 1} of ${vjob.total}`; vNotify();
+      try { await fn(item); vjob.ok++; } catch (e) { vjob.failed++; vjob.lastError = e.message; console.warn(e); } vjob.done++; vNotify(); await sleep(20); }
+  } catch (e) { vjob.lastError = e.message; }
+  toast(`${label}: ${vjob.ok} done${vjob.failed ? `, ${vjob.failed} failed (${vjob.lastError})` : ''}.`, 6000);
+  vjob.running = false; vNotify(); await releaseModel();
+  if (view === 'objects') renderObjectStep(); else if (view === 'process') renderProcess(); else if (view === 'surveys') renderSurveys();
+}
+
+/* ================= Objects review ================= */
+const OBJ_STATUS = { new: 'to review', reprocessed: 're-processed', reprocess: 'flagged', approved: 'approved', ignored: 'ignored' };
+let objState = { filter: 'review', kind: 'all', i: 0, view: 0 };
+function objFilterList() {
+  const f = objState.filter; let list = [...OBJECTS.values()].filter(ob => ob.views.length || ob.status !== 'new');
+  if (objState.kind !== 'all') list = list.filter(ob => ob.kind === objState.kind);
+  list = list.filter(ob => f === 'all' ? true : f === 'review' ? ['new', 'reprocessed'].includes(ob.status) : ob.status === f);
+  const t = ob => { const v = ob.views[0]; const o = v && OBS.get(v.o); return o ? o.created : ''; };
+  return list.sort((a, b) => t(a).localeCompare(t(b)));   // follow the order you drove
+}
+function renderObjectsTab(v) {
+  const all = [...OBJECTS.values()]; const c = s2 => all.filter(ob => ob.status === s2).length;
+  const analysed = [...OBS.values()].filter(o => o.vision && o.vision.v === 2).length;
+  v.append(h('div', { class: 'card stack' },
+    h('div', { class: 'row' }, h('b', { style: 'flex:1' }, `${all.length} objects found`), h('span', { class: 'muted small' }, `from ${analysed} analysed photos`)),
+    h('div', { class: 'row', style: 'gap:4px' }, h('span', { class: 'pill pending' }, `${c('new') + c('reprocessed')} to review`), c('reprocess') ? h('span', { class: 'pill conflict' }, `${c('reprocess')} flagged for re-processing`) : null, h('span', { class: 'pill approved' }, `${c('approved')} approved`), h('span', { class: 'pill' }, `${c('ignored')} ignored`)),
+    h('div', { class: 'row' }, h('button', { class: 'btn primary', disabled: !all.length, onclick: () => { objState = { filter: 'review', kind: 'all', i: 0, view: 0 }; go('objects'); } }, 'Step through objects'),
+      h('button', { class: 'btn', onclick: () => go('process') }, 'Processing'))));
+  if (!all.length) v.append(h('p', { class: 'muted' }, analysed ? 'Run "Find objects" on the Process tab.' : 'Analyse photos on the Process tab first.'));
+}
+function objCropBox(o, v, kind) {
+  if (v.box) return v.box; const ht = OBJ_HEIGHT[kind] || 3; const C = obsCam(o); const w = Math.atan2(2, v.dist || 10) / (2 * Math.atan(C.fov.th));
+  return [Math.max(0, v.x - w), Math.max(0, (v.top != null ? v.top : v.y - 0.2) - 0.02), Math.min(1, v.x + w), Math.min(1, v.y + 0.02)];
+}
+function renderObjectStep() {
+  if (MAP) { MAP.remove(); MAP = null; }
+  const v = $('#v-objects'); v.innerHTML = ''; const list = objFilterList(); objState.i = Math.max(0, Math.min(objState.i, list.length - 1));
+  const counts = k => [...OBJECTS.values()].filter(ob => k === 'review' ? ['new', 'reprocessed'].includes(ob.status) : k === 'all' || ob.status === k).length;
+  const seg = h('div', { class: 'seg' }); for (const [k, l] of [['review', 'To review'], ['reprocess', 'Flagged'], ['approved', 'Approved'], ['ignored', 'Ignored'], ['all', 'All']]) seg.append(h('button', { class: objState.filter === k ? 'on' : '', onclick: () => { objState.filter = k; objState.i = 0; renderObjectStep(); } }, `${l} ${counts(k)}`));
+  const kinds = h('select', { 'aria-label': 'Kind', onchange: e => { objState.kind = e.target.value; objState.i = 0; renderObjectStep(); } }, h('option', { value: 'all' }, 'All kinds'), Object.entries(KIND_LABEL).map(([k, l]) => h('option', { value: k, selected: objState.kind === k }, l)));
+  v.append(h('div', { class: 'dhead' }, h('button', { class: 'btn small', onclick: () => { survTab = 'objects'; go('surveys'); } }, '← Review'), h('div', { class: 'title' }, h('b', {}, 'Objects'), h('span', { class: 'muted small' }, list.length ? `${objState.i + 1} of ${list.length}` : 'none here')), kinds));
+  v.append(seg, progressBox());
+  const flagged = [...OBJECTS.values()].filter(ob => ob.status === 'reprocess');
+  if (flagged.length) v.append(h('div', { class: 'card row', style: 'margin-bottom:10px' }, h('span', { style: 'flex:1' }, `${flagged.length} object${flagged.length > 1 ? 's' : ''} flagged for re-processing.`), h('button', { class: 'btn small primary', onclick: () => runObjectJob('Re-processing', flagged, reprocessObject) }, 'Re-process now')));
+  bulkBar(v);
+  if (!list.length) { v.append(h('p', { class: 'muted' }, 'Nothing in this list.')); return; }
+  const ob = list[objState.i]; const views = ob.views.map(x => ({ ...x, kind: 'seen' }));
+  const exp = expectedViews(ob).filter(e => !ob.views.some(x => x.o === e.o)).map(x => ({ ...x, kind: 'missed' }));
+  const all = [...views, ...exp]; objState.view = Math.min(objState.view, all.length - 1); const cur = all[objState.view]; const co = cur && OBS.get(cur.o);
+  // photo with a ring where the object is
+  let pane = h('div', { class: 'muted' }, 'No photo for this object.');
+  if (co) { const C = obsCam(co); const rr = Math.max(18, C.w / 28), sw = Math.max(3, C.w / 250); const col = cur.kind === 'seen' ? '#ff3df0' : '#bbbbbb';
+    const extra = `<circle cx="${cur.x * C.w}" cy="${cur.y * C.h}" r="${rr * 1.5}" fill="none" stroke="${col}" stroke-width="${sw}"${cur.kind === 'missed' ? ` stroke-dasharray="${sw * 2} ${sw * 2}"` : ''}/>`;
+    pane = photoPane(co, { extra, osm: false }); }
+  const strip = h('div', { class: 'thumbs', style: 'grid-template-columns:repeat(auto-fill,minmax(72px,1fr))' });
+  all.forEach((x, k) => { const o = OBS.get(x.o); if (!o) return; const im = h('img', { alt: '', style: 'object-fit:contain;background:#000' }); cropURL(o, objCropBox(o, x, ob.kind), 0.5).then(u => im.src = u);
+    strip.append(h('button', { 'aria-label': (x.kind === 'seen' ? 'Seen in photo ' : 'Not detected in photo ') + (k + 1), style: `outline:${k === objState.view ? '3px solid var(--info)' : 'none'};border:2px ${x.kind === 'seen' ? 'solid var(--add)' : 'dashed var(--muted)'}`, onclick: () => { objState.view = k; renderObjectStep(); } }, im)); });
+  const typeSel = h('select', { id: 'f-objtype' }, h('option', { value: '' }, ob.kind === 'sign' ? 'Choose the sign…' : 'Choose…'), (KIND_PRESETS[ob.kind] || []).map(([val, l]) => h('option', { value: val, selected: ob.type === val }, l)));
+  const spd = h('input', { type: 'number', inputmode: 'numeric', step: 10, min: 10, max: 130, placeholder: 'km/h', style: 'width:6em', value: (ob.values || {}).maxspeed || '', hidden: ob.type !== 'speed_sign', 'aria-label': 'Speed limit' });
+  typeSel.onchange = () => { ob.type = typeSel.value || null; spd.hidden = ob.type !== 'speed_sign'; saveObject(ob); };
+  spd.oninput = () => { ob.values = Object.assign({}, ob.values, { maxspeed: spd.value }); };
+  const confPill = h('span', { class: 'pill ' + (ob.conf >= 0.75 ? 'approved' : ob.conf >= 0.45 ? 'pending' : 'conflict') }, `confidence ${Math.round((ob.conf || 0) * 100)}%`);
+  const info = h('div', { class: 'card stack' },
+    h('div', { class: 'row' }, h('b', { style: 'font-size:18px;flex:1' }, KIND_LABEL[ob.kind] + (ob.height ? ` ~${Math.round(ob.height)} m` : '')), h('span', { class: 'pill ' + (ob.status === 'approved' ? 'approved' : ob.status === 'ignored' ? 'rejected' : ob.status === 'reprocess' ? 'conflict' : 'pending') }, OBJ_STATUS[ob.status]), confPill),
+    h('div', { class: 'small' }, `Seen in ${views.length} of ${views.length + exp.length} photos that should show it · ${ob.trips || 1} pass${(ob.trips || 1) > 1 ? 'es' : ''} · sightings agree within ${ob.spread ?? '?'} m`),
+    ob.osm ? h('div', { class: 'small' }, h('b', {}, 'Already in OSM: '), `${ob.osm.label} (node ${ob.osm.id}), ${fmtM(llDist(ob, ob.osm))} from where the photos put it. Confirming records that it's still there.`) : h('div', { class: 'small muted' }, 'Not in OSM yet.'),
+    (ob.notes || []).length ? h('div', { class: 'small muted' }, ob.notes.join(' ')) : null,
+    ob.osm ? null : h('div', { class: 'row' }, typeSel, spd),
+    cur ? h('div', { class: 'muted small' }, cur.kind === 'seen' ? `Showing photo ${objState.view + 1}: detected here, ${fmtM(cur.dist)} from the camera.` : `Showing photo ${objState.view + 1}: the object should be inside the dashed ring (${fmtM(cur.dist)} away) but wasn't detected. Hidden, gone, or a false detection elsewhere?`) : null);
+  const act = (status) => objAction(ob, status);
+  const buttons = h('div', { class: 'row' },
+    h('button', { class: 'btn primary', onclick: () => act('approved') }, ob.osm ? 'Confirm (A)' : 'Approve (A)'),
+    h('button', { class: 'btn', onclick: () => act('reprocess') }, 'Re-process (R)'),
+    h('button', { class: 'btn danger', onclick: () => act('ignored') }, 'Ignore (I)'),
+    h('button', { class: 'btn small', disabled: objState.i === 0, onclick: () => { objState.i--; objState.view = 0; renderObjectStep(); } }, '‹ Back'),
+    h('button', { class: 'btn small', onclick: () => { objState.i++; objState.view = 0; renderObjectStep(); } }, 'Skip ›'));
+  v.append(h('div', { class: 'panes' }, h('div', { class: 'stack' }, pane, strip, h('div', { class: 'keys' }, h('kbd', {}, 'A'), ' approve  ', h('kbd', {}, 'R'), ' re-process  ', h('kbd', {}, 'I'), ' ignore  ', h('kbd', {}, '←'), h('kbd', {}, '→'), ' move  ', h('kbd', {}, '1'), '–', h('kbd', {}, '9'), ' photos')),
+    h('div', { class: 'stack' }, info, buttons, h('div', { id: 'objmap', class: 'mapbox', style: 'height:340px' }))));
+  setTimeout(() => drawObjectMap(ob, all), 0);
+}
+function drawObjectMap(ob, all) {
+  if (view !== 'objects' || !$('#objmap')) return;
+  MAP = L.map('objmap', { preferCanvas: true }).setView([ob.lat, ob.lon], 19);
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(MAP);
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19, attribution: 'Imagery © Esri' });
+  L.control.layers({ 'OSM map': osm, 'Esri imagery': sat }).addTo(MAP);
+  const o0 = OBS.get((all[0] || {}).o); const ctx = o0 && osmOf(o0);
+  if (ctx) for (const [id, nd] of Object.entries(ctx.nodes)) { const l = poiLabel(nd.tags); if (!l || llDist(ob, nd) > 60) continue; L.circleMarker([nd.lat, nd.lon], { radius: 5, color: '#1f5fae', weight: 2, fillColor: '#7fb0ff', fillOpacity: .9 }).bindTooltip('In OSM: ' + l).addTo(MAP); }
+  const bounds = [[ob.lat, ob.lon]];
+  all.forEach((x, k) => { const o = OBS.get(x.o); if (!o) return; const seen = x.kind === 'seen';
+    L.polyline([[o.cam.lat, o.cam.lon], [ob.lat, ob.lon]], { color: seen ? (KIND_COLOR[ob.kind] || '#f0f') : '#999', weight: k === objState.view ? 3 : 1.5, dashArray: seen ? null : '4 5', opacity: .9 }).addTo(MAP);
+    L.circleMarker([o.cam.lat, o.cam.lon], { radius: k === objState.view ? 7 : 5, color: '#fff', weight: 2, fillColor: seen ? '#1f5fae' : '#888', fillOpacity: 1 }).bindTooltip(`Photo ${k + 1}${seen ? '' : ' (not detected)'}`).on('click', () => { objState.view = k; renderObjectStep(); }).addTo(MAP);
+    if (seen && x.lat != null) L.circleMarker([x.lat, x.lon], { radius: 3, stroke: false, fillColor: KIND_COLOR[ob.kind] || '#f0f', fillOpacity: 1, interactive: false }).addTo(MAP);
+    bounds.push([o.cam.lat, o.cam.lon]); });
+  const col = KIND_COLOR[ob.kind] || '#fff';
+  const m = L.marker([ob.lat, ob.lon], { draggable: ob.status !== 'approved', icon: L.divIcon({ className: 'lf-feat', html: `<div style="width:22px;height:22px;border-radius:50%;background:${col};border:3px solid #000;box-shadow:0 0 0 2px #fff"></div>`, iconSize: [22, 22] }) })
+    .bindTooltip('Drag to correct the position').addTo(MAP);
+  m.on('dragend', () => { const ll = m.getLatLng(); ob.lat = ll.lat; ob.lon = ll.lng; ob.moved = true; scoreObject(ob); saveObject(ob); renderObjectStep(); });
+  MAP.fitBounds(bounds, { padding: [24, 24], maxZoom: 20 });
+}
+async function objAction(ob, status) {
+  if (status === 'approved' && !ob.osm) {
+    if (!ob.type) { toast('Choose what it is first.'); $('#f-objtype') && $('#f-objtype').focus(); return; }
+    if (ob.type === 'speed_sign' && !(+((ob.values || {}).maxspeed) >= 10)) { toast('Type the number on the sign.'); return; }
+  }
+  ob.status = status;
+  const best = ob.views.slice().sort((a, b) => Math.abs(a.dist - 12) - Math.abs(b.dist - 12))[0]; const o = best && OBS.get(best.o);
+  let mark = null; for (const ph of OBS.values()) { const a = ph.anns.find(x => x.objId === ob.id); if (a) { mark = { o: ph, a }; break; } }
+  if (status === 'approved' && ob.osm) { const key = 'n' + ob.osm.id; for (const x of ob.views) { const oo = OBS.get(x.o); if (oo) recordVerdict({ key }, { o: oo }, 'seen'); } }
+  else if (status === 'approved' && o) {
+    const values = Object.assign({}, ob.values || {}, ob.type === 'crossing' ? { 'crossing:markings': 'zebra' } : {});
+    if (mark && mark.a.status !== 'uploaded') { Object.assign(mark.a, { preset: ob.type, values, lat: ob.lat, lon: ob.lon, manual: true, status: 'approved' }); resolveAnn(mark.o, mark.a); saveObs(mark.o); }
+    else if (!mark) { const a = { id: newId(), x: best.x, y: best.y, preset: ob.type, values, status: 'approved', lat: ob.lat, lon: ob.lon, manual: true, dist: best.dist, src: 'camera', objId: ob.id }; o.anns.push(a); resolveAnn(o, a); saveObs(o); }
+  } else if (mark && mark.a.status !== 'uploaded') { mark.a.status = status === 'ignored' ? 'rejected' : 'pending'; saveObs(mark.o); }
+  await saveObject(ob); objState.view = 0;
+  if (objFilterList().includes(ob)) objState.i++;   // stays in this list (e.g. "All"): move on
+  renderObjectStep();
+}
+function bulkBar(v) {
+  const all = [...OBJECTS.values()].filter(ob => ['new', 'reprocessed'].includes(ob.status));
+  const sure = all.filter(ob => !ob.osm && ob.type && ob.type !== 'speed_sign' && ob.conf >= 0.8 && (ob.trips || 1) >= 2);
+  const osmOk = all.filter(ob => ob.osm && ob.conf >= 0.6);
+  const lonely = all.filter(ob => ob.views.length <= 1 && (ob.expected || 0) >= 3);
+  if (!sure.length && !osmOk.length && !lonely.length) return;
+  const b = (label, list, status) => list.length ? twoTap(h('button', { class: 'btn small wrap' }, `${label} (${list.length})`), `${label} (${list.length})`, async () => { for (const ob of list) await objAction(ob, status); toast(`${list.length} updated.`); renderObjectStep(); }) : null;
+  v.append(h('div', { class: 'card stack', style: 'margin-bottom:10px' }, h('b', { class: 'small' }, 'For large batches'),
+    h('div', { class: 'row' }, b('Approve high-confidence objects seen on 2+ passes', sure, 'approved'), b('Confirm objects that match OSM', osmOk, 'approved'), b('Flag objects seen in only one of 3+ photos', lonely, 'reprocess')),
+    h('div', { class: 'muted small' }, 'Each needs a second tap. Anything approved still goes through Upload, where you can see every change before it is sent.')));
+}
+document.addEventListener('keydown', e => {
+  if (view !== 'objects' || (e.target.closest && e.target.closest('input,textarea,select,dialog[open]')) || e.metaKey || e.ctrlKey || e.altKey) return;
+  const list = objFilterList(), ob = list[objState.i]; const k = e.key.toLowerCase(); if (!ob && !['arrowleft'].includes(k)) return;
+  if (k === 'a') objAction(ob, 'approved'); else if (k === 'r') objAction(ob, 'reprocess'); else if (k === 'i') objAction(ob, 'ignored');
+  else if (k === 'arrowright') { objState.i++; objState.view = 0; renderObjectStep(); } else if (k === 'arrowleft') { objState.i = Math.max(0, objState.i - 1); objState.view = 0; renderObjectStep(); }
+  else if (/^[1-9]$/.test(k)) { objState.view = +k - 1; renderObjectStep(); } else return;
+  e.preventDefault();
+});
+
+/* ================= Process tab: the batch pipeline ================= */
+function renderProcess() {
+  const v = $('#v-process'); v.innerHTML = '';
+  const photos = [...OBS.values()], analysed = photos.filter(o => o.vision && o.vision.v === 2), trips = [...new Set(photos.filter(o => o.trip).map(o => o.trip))];
+  const unrefined = trips.filter(t => photos.some(o => o.trip === t && !o.cam.refined));
+  const objs = [...OBJECTS.values()], cnt = st => objs.filter(ob => ob.status === st).length;
+  const pend = photos.reduce((n, o) => n + o.anns.filter(a => a.status === 'approved').length, 0);
+  v.append(h('h2', {}, 'Process'), h('p', { class: 'muted small', style: 'margin-top:-6px' }, 'Run these in order; each picks up where it left off. Everything runs on this device. A computer with a graphics chip is much faster than a phone for big batches.'));
+  v.append(progressBox());
+  const imp = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ''; if (f) importSurvey(f).catch(err => toast('Import failed: ' + err.message, 7000)); } });
+  const step = (n, title, status, btn, note) => v.append(h('div', { class: 'card row', style: 'margin-bottom:8px;align-items:flex-start' }, h('span', { class: 'num', style: 'background:var(--sunk);color:var(--fg)' }, n),
+    h('div', { style: 'flex:1;min-width:12em' }, h('b', {}, title), h('div', { class: 'small' }, status), note ? h('div', { class: 'muted small' }, note) : null), btn));
+  step(1, 'Photos', `${photos.length} on this device (${photos.filter(o => o.kind === 'drive').length} from ${trips.length} drive${trips.length === 1 ? '' : 's'})`, h('label', { class: 'btn small' }, 'Import a survey', imp), 'Bring in surveys exported from the phone, or results from another device or a future native processor.');
+  step(2, 'Refine drives', unrefined.length ? `${unrefined.length} drive${unrefined.length > 1 ? 's' : ''} not refined yet` : 'All drives refined', unrefined.length ? h('button', { class: 'btn small primary', onclick: async () => { let n = 0; for (const t of unrefined) { const r = await refineTrip(t).catch(() => null); if (r) n += r.n; } toast(`Refined ${n} photos.`); renderProcess(); } }, 'Refine') : null, 'Smooths each drive\'s GPS trail and re-places its photos.');
+  step(3, 'Analyse photos', `${analysed.length} of ${photos.length} analysed`, photos.length > analysed.length ? h('button', { class: 'btn small primary', onclick: () => runAnalysis(photos, 'all photos') }, `Analyse ${photos.length - analysed.length}`) : null, `Quality: ${S.visionQuality === 'lite' ? 'Lighter' : 'Best'} (Settings). Finds kerbs, lines, objects; lines each photo up with OSM.`);
+  step(4, 'Find objects', objs.length ? `${objs.length} objects` : 'Not run yet', analysed.length ? h('button', { class: 'btn small primary', onclick: async () => { const n = await buildObjects(); toast(`${n} objects.`); renderProcess(); } }, objs.length ? 'Update' : 'Find objects') : null, 'Groups detections of the same thing across photos and passes, checks which photos should have seen it, and compares with OSM.');
+  step(5, 'Review objects', `${cnt('new') + cnt('reprocessed')} to review · ${cnt('approved')} approved · ${cnt('ignored')} ignored`, objs.length ? h('button', { class: 'btn small primary', onclick: () => { objState = { filter: 'review', kind: 'all', i: 0, view: 0 }; go('objects'); } }, 'Step through') : null, 'Approve, re-process or ignore each one; bulk actions for large batches.');
+  step(6, 'Re-process flagged', cnt('reprocess') ? `${cnt('reprocess')} flagged` : 'Nothing flagged', cnt('reprocess') ? h('button', { class: 'btn small primary', onclick: () => runObjectJob('Re-processing', objs.filter(ob => ob.status === 'reprocess'), reprocessObject) }, 'Re-process') : null, 'Looks again, close up, in every photo that should show each object, and fixes the position where the sight lines from different photos cross. They come back to review.');
+  step(7, 'Review roads', 'Widths, kerbs, footpaths, lanes', h('button', { class: 'btn small', onclick: () => { survTab = 'roads'; go('surveys'); } }, 'By road'), null);
+  step(8, 'Upload', `${pend} approved change${pend === 1 ? '' : 's'} ready`, h('button', { class: 'btn small', onclick: () => go('upload') }, 'Upload'), null);
+  v.append(h('div', { class: 'row', style: 'margin-top:6px' }, h('button', { class: 'btn primary', onclick: runAll }, 'Run steps 2–4 now'),
+    h('button', { class: 'btn', onclick: () => exportData(photos, false) }, 'Export results (no photos)')));
+}
+async function runAll() {
+  const photos = [...OBS.values()]; for (const t of new Set(photos.filter(o => o.trip && !o.cam.refined).map(o => o.trip))) await refineTrip(t).catch(() => {});
+  if (photos.some(o => !o.vision || o.vision.v !== 2)) await runAnalysis(photos, 'all photos');
+  const n = await buildObjects(); toast(`Done: ${n} objects ready to review.`, 6000); if (view === 'process') renderProcess();
+}
+
+/* ================= Drive map (field) ================= */
+let dmTimer = null, dmLive = null, dmTrail = null;
+function geomSlice(g, s0, s1) {
+  const out = []; const p0 = posAt(g, s0); if (p0) out.push([p0.lat, p0.lon]);
+  for (const pt of g) if (pt.s > s0 && pt.s < s1) out.push([pt.lat, pt.lon]);
+  const p1 = posAt(g, s1); if (p1) out.push([p1.lat, p1.lon]); return out;
+}
+function coverageStats(plan) {
+  let one = 0, both = 0, done = 0; const target = Math.max(1, Number(S.targetPasses) || 2);
+  for (const e of plan) for (const b of e.plan) {
+    const n = d => (e.bins[d].get(b) || new Set()).size; const all = e.need.every(d => n(d) >= 1);
+    if (all) both++; else one++; if (e.need.every(d => n(d) >= target)) done++;
+  }
+  return { km: Math.round((one + both) * BIN / 100) / 10, one, both, done, total: one + both };
+}
+function renderDriveMap() {
+  const v = $('#v-drivemap'); v.innerHTML = ''; const plan = passPlan(); const st = coverageStats(plan);
+  v.append(h('div', { class: 'row', style: 'justify-content:space-between;align-items:baseline' }, h('h2', { style: 'margin:0' }, 'Drive map'),
+    h('span', { class: 'muted small' }, plan.length ? `${st.km} km of road · ${st.total ? Math.round(st.both / st.total * 100) : 0}% driven both ways · ${st.total ? Math.round(st.done / st.total * 100) : 0}% at ${Math.max(1, Number(S.targetPasses) || 2)} passes` : 'Nothing driven yet')));
+  v.append(h('div', { class: 'row small', style: 'gap:12px;margin:6px 0 8px' },
+    h('span', {}, h('span', { style: 'display:inline-block;width:18px;height:5px;background:#f2a100;vertical-align:middle;margin-right:5px' }), 'driven one way'),
+    h('span', {}, h('span', { style: 'display:inline-block;width:18px;height:5px;background:#3fbf8d;vertical-align:middle;margin-right:5px' }), 'both ways (or a one-way road)'),
+    h('span', {}, h('span', { style: 'display:inline-block;width:18px;height:5px;background:#0b6e3a;vertical-align:middle;margin-right:5px' }), 'all passes done'),
+    h('span', {}, h('span', { style: 'display:inline-block;width:18px;height:2px;background:#1f5fae;vertical-align:middle;margin-right:5px' }), 'your GPS trail')));
+  v.append(h('div', { id: 'dmap', class: 'mapbox', style: 'height:calc(100vh - 260px);min-height:320px' }));
+  v.append(h('p', { class: 'muted small' }, 'Coverage is worked out from your drive photos matched to OSM roads, so it fills in once OSM data for an area has loaded. Roads not in OSM show only as your trail.'));
+  setTimeout(() => drawDriveMap(plan), 0);
+}
+async function drawDriveMap(plan) {
+  const start = sensors.pos ? [sensors.pos.lat, sensors.pos.lon] : plan.length && plan[0].geom.length ? [plan[0].geom[0].lat, plan[0].geom[0].lon] : [-31.9523, 115.8613];
+  MAP = L.map('dmap', { preferCanvas: true }).setView(start, 15);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, maxNativeZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(MAP);
+  const bounds = []; const target = Math.max(1, Number(S.targetPasses) || 2);
+  for (const tr of await store.all('trails').catch(() => [])) {
+    const f = tr.fixes.filter(x => x.acc < 40); const st = Math.max(1, Math.floor(f.length / 3000));
+    const ll = f.filter((_, i) => i % st === 0).map(x => [x.lat, x.lon]); if (ll.length > 1) { L.polyline(ll, { color: '#1f5fae', weight: 2, opacity: .7, interactive: false }).addTo(MAP); bounds.push(...ll); }
+  }
+  for (const e of plan) for (const b of e.plan) {
+    const n = d => (e.bins[d].get(b) || new Set()).size; const all = e.need.every(d => n(d) >= 1), full = e.need.every(d => n(d) >= target);
+    const seg = geomSlice(e.geom, b * BIN, Math.min(e.len, (b + 1) * BIN)); if (seg.length < 2) continue;
+    L.polyline(seg, { color: full ? '#0b6e3a' : all ? '#3fbf8d' : '#f2a100', weight: 6, opacity: .9 })
+      .bindTooltip(`${shortName(e.way)} · ${e.need.map(d => `${e.dirName[d]} ${n(d)}/${target}`).join(' · ')}`).addTo(MAP); bounds.push(...seg);
+  }
+  if (bounds.length && !sensors.pos) MAP.fitBounds(bounds, { padding: [20, 20], maxZoom: 17 });
+  dmLive = L.circleMarker(start, { radius: 8, color: '#fff', weight: 3, fillColor: '#1f5fae', fillOpacity: 1 }); dmTrail = L.polyline([], { color: '#1f5fae', weight: 3 }).addTo(MAP);
+  let nextMk = null;
+  const tick = () => {
+    if (view !== 'drivemap' || !MAP) return; const p = posNow();
+    if (p) { if (!MAP.hasLayer(dmLive)) dmLive.addTo(MAP); dmLive.setLatLng([p.lat, p.lon]); }
+    if (drive.on && drive.trail) dmTrail.setLatLngs(drive.trail.fixes.filter(x => x.acc < 40).map(x => [x.lat, x.lon]));
+    if (p) { const nx = nextPass(plan, p); if (nextMk) nextMk.remove(); if (nx) nextMk = L.circleMarker([nx.pt.lat, nx.pt.lon], { radius: 9, color: '#fff', weight: 3, fillColor: '#ffb51f', fillOpacity: 1 }).bindTooltip(`Next: ${shortName(nx.e.way)} ${nx.e.dirName[nx.d]}`).addTo(MAP); }
+  };
+  tick(); clearInterval(dmTimer); dmTimer = setInterval(tick, 2000);
 }
 
 /* ================= mark sheet ================= */
@@ -2688,7 +3126,7 @@ async function exportData(list, withPhotos = true) {
       marks: o.anns.map(a => ({ preset: a.preset, x: a.x, y: a.y, status: a.status, way: a.wayId, lat: a.lat, lon: a.lon, distance_m: a.dist, bearing_deg: a.bearing, values: a.values, text: a.text, result: a.result })) });
     feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [o.cam.lon, o.cam.lat] }, properties: { id: o.id, created: o.created, heading: Math.round(Hd(o) * 10) / 10, marks: o.anns.length } });
   }
-  zip.file('survey.json', JSON.stringify({ app: APP, exported: new Date().toISOString(), frame: 'ENU metres at each camera; basis vectors are unit vectors (east, north, up)', photos: meta, checks: CHECKS, trips: loadLS('lm.trips', {}), with_photos: withPhotos }));
+  zip.file('survey.json', JSON.stringify({ app: APP, exported: new Date().toISOString(), frame: 'ENU metres at each camera; basis vectors are unit vectors (east, north, up)', photos: meta, checks: CHECKS, trips: loadLS('lm.trips', {}), objects: [...OBJECTS.values()].filter(ob => ob.views.some(v => list.some(o => o.id === v.o))), with_photos: withPhotos }));
   const trails = []; for (const tid of new Set(list.map(o => o.trip).filter(Boolean))) { const tr = await store.get('trails', tid).catch(() => null); if (tr) trails.push(tr); }
   zip.file('trails.json', JSON.stringify(trails));
   zip.file('cameras.geojson', JSON.stringify({ type: 'FeatureCollection', features: feats }));
@@ -2701,7 +3139,7 @@ async function exportData(list, withPhotos = true) {
 async function clearSurveys() {
   if (drive.on) throw new Error('end the drive first');
   for (const u of photoURLs.values()) URL.revokeObjectURL(u); photoURLs.clear(); urlOwner.clear(); OBS.clear(); current = null;
-  for (const n of ['obs', 'trails', 'video']) await store.clear(n);
+  for (const n of ['obs', 'trails', 'video', 'objects']) await store.clear(n); OBJECTS.clear();
   CHECKS = {}; for (const k of ['lm.checks', 'lm.trips', 'lm.ignored', 'lm.clusterPos']) localStorage.removeItem(k);
   roadCache.clear(); annSigs.clear(); tripVids.clear(); segURLs.clear(); cropCache.clear();
 }
@@ -2772,11 +3210,13 @@ function renderSettings() {
 /* ================= boot ================= */
 for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => go(b.dataset.v));
 $('#btnPrimary').addEventListener('click', onPrimary);
+$('#btnSettings').addEventListener('click', () => go('settings'));
 $('#btnTools').addEventListener('click', () => toggleTools());
 for (const b of document.querySelectorAll('.modes button')) b.addEventListener('click', () => setMode(b.dataset.m));
 (async () => {
   updateBadge();
   try { for (const o of await store.all('obs')) { OBS.set(o.id, migrate(o)); o.anns.forEach(a => annSigs.set(a.id, annSig(a))); } } catch (e) { toast('Storage unavailable: ' + e.message); }
+  try { for (const ob of await store.all('objects')) OBJECTS.set(ob.id, ob); } catch {}
   const returned = await handleOAuthReturn();
   go(returned ? 'upload' : (OBS.size ? 'surveys' : 'capture'));
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -6,6 +6,20 @@ It targets the tags [BeamNG.Earth](https://github.com/TecnaGamer/BeamNG.Earth) b
 
 Live app: https://yahms.github.io/localitymap/
 
+## How it fits together
+
+LocalityMap has two halves. The tabs follow them in order:
+
+| Tab | Half | What you do there |
+|---|---|---|
+| **Capture** | field | Take photos on foot or record a drive. |
+| **Drive map** | field | See where you've been and what still needs driving. |
+| **Process** | desk | Run the batch steps on everything captured: refine drives, analyse photos, find objects, re-process flagged ones. |
+| **Review** | desk | Step through objects, roads and areas, and approve, fix or ignore what was found. |
+| **Upload** | desk | Send approved changes to OSM. |
+
+The field half collects as much as it can and decides nothing. The desk half does the heavy work afterwards, on the phone or (better for big batches) a computer. Processing is resumable and runs entirely on your device. The survey zip is a documented format ([FORMAT.md](FORMAT.md)), so a future native processor can do the desk work faster and hand results back for review.
+
 ---
 
 ## 1. Setup
@@ -67,16 +81,38 @@ While driving, the panel under the heading shows:
 
 Turn-by-turn navigation isn't built in. Switching to a maps app would stop the camera, because phones pause web apps in the background. Use the arrow and plan map, or a second device (car screen or another phone) for navigation.
 
-### Import
-Photos from the gallery work too. iPhone photos usually carry position and camera direction in their EXIF data; others can be positioned on the map by hand.
+### Drive map
+The **Drive map** tab shows every drive so far as a thin blue line, with each road coloured by coverage in 40 m stretches:
+- **amber**: driven in one direction
+- **green**: driven in both directions (or the only legal direction, on a one-way street)
+- **dark green**: every direction has all the passes you asked for
+
+Your position and the next stretch to drive are marked. It updates every couple of seconds while open, so a passenger can use it to plan the route.
 
 ---
 
-## 3. Reviewing
+## 3. Processing
 
-The **Review** tab has four views.
+The **Process** tab is a checklist of batch steps, each showing what's left and a button to run it:
+
+1. **Photos**: what's on this device; import survey zips from other devices.
+2. **Refine drives**: smooth each GPS trail and re-place its photos.
+3. **Analyse photos**: run the vision model on every photo not yet analysed (see *Letting the camera do it*). Results are saved per photo, so you can stop and carry on later.
+4. **Find objects**: group detections of the same pole, sign, hydrant and so on across all photos and passes into single objects (see *Objects*).
+5. **Review objects**: step through them.
+6. **Re-process flagged**: look again, harder, at the objects you flagged.
+7. **Review roads** and 8. **Upload**.
+
+*Run steps 2–4 now* does the unattended part in one go. Analysis runs in a background worker so the page stays responsive. For hundreds of photos, use a computer with a graphics chip: import the zip there, process, review, and either upload from there or *Export results (no photos)* back to the phone.
+
+---
+
+## 4. Reviewing
+
+The **Review** tab has five views.
 
 - **Photos**: drives (with every photo) and single photos. Open one to mark it.
+- **Objects**: everything the camera found, one entry per physical object (below).
 - **By road**: every OSM road that appears in your photos (the road a drive photo was on, or the road a hand photo looks along), with the photos in order. Open a road to get the **road sheet**: flip through all its photos with that road highlighted, fill in one set of road details for the whole way, and approve everything on it at once. If marks on different photos disagree (say `lanes=2` on one and `3` on another), the road sheet flags the conflict and their individual road marks are merged into the one change when you save.
 - **By area**: about 450 m squares named after their main streets, listing every change in the area for bulk approval.
 - **Passes**: a map and list of every road driven, showing how many passes each direction has.
@@ -143,7 +179,21 @@ The summary then:
 
 The photo overlay now also shows OSM point objects (light blue rings with a short pole), so missing or misplaced ones stand out while marking.
 
-Spotting objects is done by you, not automatically. Automatic detection is planned for the native app (see section 5).
+### Objects: step through, approve, re-process or ignore
+Each object (sign, power pole, street light, hydrant, drain, cabinet, bench, bin, post box, crossing) is built from every photo that saw it, across all drives. For each one the app also works out which photos *should* have shown it, so a sighting in one photo out of six counts for less than one in six out of six.
+
+*Step through objects* shows one object at a time:
+- **The photo**, with the object ringed, and a strip of close-up crops from every photo underneath. Solid borders are photos where it was detected; dashed borders are photos where it should be visible but wasn't detected. Click any crop (or press `1`–`9`) to see that photo.
+- **The map**, with the object, every camera that saw it and its sight line (dashed for misses), and nearby OSM objects in blue. Drag the object to correct its position.
+- **The facts**: how many photos and passes saw it, how closely the sightings agree, a confidence score, and whether OSM already has it. If OSM has it, *Approve* becomes *Confirm* and records it as seen. Otherwise choose the exact type (for example power pole or telephone pole; stop, give way or speed limit plus the number) before approving.
+
+Then: **Approve** `A`, **Re-process** `R`, **Ignore** `I`. It moves to the next object automatically, in the order you drove. `←` `→` go back and forward.
+
+**For large batches**, three bulk actions each need a second tap: approve high-confidence objects seen on two or more separate passes, confirm everything that matches OSM, and flag objects seen in only one of three or more photos that should show them.
+
+**Re-processing.** Objects you flag go through a deeper second pass. For every photo that should show the object (up to ten, spread across passes), the app crops tightly around where it ought to be, enlarges the crop up to four times and runs the model again. Small or distant objects are much easier to find this way. It then draws the sight line from each photo's camera to the object and finds where they cross, discarding any line more than 1.5 m out. If the lines come from directions at least 6° apart, that crossing becomes the position; if they're nearly parallel (all from straight behind), it uses where the object meets the ground instead. The object comes back to review with a note: how many photos it was found in, how the position was fixed, and how far it moved. Re-running *Find objects* later never undoes your decisions or hand-placed positions.
+
+Approving creates a normal mark (tagged as *found by the camera*), so it shows on the photo and goes through Upload, where you see every change before it's sent.
 
 ### Reviewing on an iPad or computer
 Survey data lives on the device that captured it. To review elsewhere:
@@ -176,7 +226,7 @@ If the kerbs only line up when the lines are wider or narrower than the real roa
 
 ---
 
-## 4. Data points collected
+## 5. Data points collected
 
 What BeamNG.Earth uses today comes from its README (roads with lanes, widths, speed limits and markings, sidewalks and curbs, curb ramps, storm drains, traffic islands, roundabouts, shoulders, toll booths, retaining walls, street lights, utility poles, traffic signals, stop and speed-limit signs, bridges by type, buildings with real heights and roofs). Everything else is collected because it's cheap to record while you're there and likely to matter in later versions.
 
@@ -274,7 +324,7 @@ Export from a drive card, an area, or Settings → *Export everything*. The zip 
 
 ---
 
-## 5. Where a web app stops
+## 6. Where a web app stops
 
 The web app is fine for the survey-review-upload loop. These are the limits you'll hit, and what a native app would add.
 
@@ -293,10 +343,15 @@ The web app is fine for the survey-review-upload loop. These are the limits you'
 
 A practical route is to keep this web app as the review and upload desk, and later build a small native capture app (Swift + ARKit) that writes the same `survey.json` format. Photos from either then flow through the same review.
 
+### Roadmap: scale and performance
+1. Now: field capture and desk processing are separate steps joined by a documented zip format ([FORMAT.md](FORMAT.md)). Processing is batch, resumable, runs in a background worker, and works on any device with a browser.
+2. Next: a native processor (a compiled command-line binary for a computer, using ONNX Runtime with the same Vistas model, or a larger one) that reads a folder of survey zips, uses full-resolution photos and every graphics core, and writes results this app imports for review.
+3. Later: a native phone app (Swift + ARKit) for capture that writes the same format, so the review desk doesn't change.
+
 ### Roadmap toward 3D / AR
 1. Now: geotagged photos with full camera orientation, OSM overlay on photos and on the live camera.
 2. Now: repeat passes in both directions with expected-vs-seen checks, which give confirmed observations from independent viewpoints.
-3. Next (web): reconstruct points seen in two or more drive photos by triangulating lines of sight; build simple extruded buildings from OSM footprints plus your heights and roofs, shown in the overlay.
+3. Now: objects seen from two or more drive photos are positioned by triangulating their sight lines (re-processing). Next: simple extruded buildings from OSM footprints plus your heights and roofs, shown in the overlay.
 4. Native: automatic detection fills in the expected-vs-seen answers, and ARKit session during drives for precise camera paths, LiDAR depth where available, live 3D model of the street placed over the camera view.
 
 ---
@@ -325,5 +380,6 @@ BeamNG.Earth reads roads and buildings from Overture Maps and OpenStreetMap, wit
 ## Files
 
 - `index.html`: the whole app
+- `FORMAT.md`: the survey zip and results format, for other tools and a future native processor
 - `sw.js`: offline cache for the app shell and libraries
 - `manifest.webmanifest`, `icon*`: home-screen install

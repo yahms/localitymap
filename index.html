@@ -26,6 +26,8 @@
     --accent:#3fbf8d; --accent-fg:#06281b; --mark:#ffb51f; --add:#4cc489; --mod:#e0a040; --bad:#ff7a6e; --info:#7fb0ff; color-scheme:dark}
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
+header.top{grid-row:1} main{grid-row:2} nav.tabs{grid-row:3}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--font);display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -65,34 +67,68 @@ h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute
 .seg button{border:0;background:none;padding:7px 14px;border-radius:8px;font-size:14px;color:var(--muted);cursor:pointer}
 .seg button.on{background:var(--surface);color:var(--fg);font-weight:600;box-shadow:0 1px 3px #0002}
 
-/* capture */
-#v-capture{padding:0;max-width:none;height:100%;position:relative;background:#000;color:#fff;overflow:hidden}
-#video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-#live{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.hud{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:flex-start;padding:12px max(14px,env(safe-area-inset-right,0px)) 18px max(14px,env(safe-area-inset-left,0px));gap:10px;pointer-events:none;background:linear-gradient(#000a,#0000)}
-.hud .big{font:600 30px/1 var(--mono);font-variant-numeric:tabular-nums}
-.hud .sub{font-size:13px;opacity:.88}
+/* capture: full-screen camera; HUD across the top; control rail below the picture (beside it in landscape) */
+#v-capture{padding:0;max-width:none;height:100%;position:relative;background:#000;color:#fff;overflow:hidden;--railw:0px;--railh:calc(108px + env(safe-area-inset-bottom,0px))}
+body.cam header.top{display:none}
+#video,#live{position:absolute;left:0;top:0;width:calc(100% - var(--railw));height:calc(100% - var(--railh))}
+#video{object-fit:contain;background:#000}
+#live{pointer-events:none}
+.crosshair{position:absolute;left:calc((100% - var(--railw)) / 2);top:0;height:calc(100% - var(--railh));width:0;border-left:1px dashed #ffffff44;pointer-events:none}
+.hud{position:absolute;left:0;right:var(--railw);top:0;display:grid;grid-template-columns:1fr auto 1fr;align-items:start;gap:8px;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 16px max(12px,env(safe-area-inset-left,0px));pointer-events:none;background:linear-gradient(#000b,#0000)}
+.hud .big{font:600 24px/1 var(--mono);font-variant-numeric:tabular-nums}
+.hud .sub{font-size:12px;opacity:.88;margin-top:3px}
 .hud .gps{text-align:right}
 .hud .bad{color:#ffb4a8}
-.hudwarn{position:absolute;left:50%;top:84px;transform:translateX(-50%);background:#b3261ecc;color:#fff;padding:6px 12px;border-radius:8px;font-size:13px;max-width:90%;text-align:center}
-.drivestats{position:absolute;left:max(14px,env(safe-area-inset-left,0px));bottom:110px;font:600 15px/1.35 var(--mono);text-shadow:0 1px 3px #000;font-variant-numeric:tabular-nums}
-.crosshair{position:absolute;left:50%;top:0;bottom:0;width:0;border-left:1px dashed #ffffff55;pointer-events:none}
-.capbar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-around;gap:8px;padding:16px max(14px,env(safe-area-inset-right,0px)) 18px max(14px,env(safe-area-inset-left,0px));background:linear-gradient(#0000,#000b)}
-.shutter{width:72px;height:72px;border-radius:50%;border:4px solid #fff;background:#ffffff33;flex:none}
-.shutter:active{background:#fff}
-.capbar .btn,.start .btn.ghost{background:#ffffff22;border-color:#ffffff55;color:#fff}
-.capbar .btn.on{background:#fff;color:#000}
-.start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;overflow:auto}
-.start p{max-width:40ch;opacity:.85;margin:0}
-.guide{position:absolute;left:50%;top:78px;transform:translateX(-50%);background:#000b;color:#fff;border-radius:12px;padding:8px 12px;display:flex;gap:10px;align-items:center;max-width:min(92%,520px);font-size:14px;line-height:1.3}
-.guide .arrow{width:34px;height:34px;flex:none}
-.guide b{font-size:15px}
-.mini{position:absolute;right:max(10px,env(safe-area-inset-right,0px));top:150px;width:min(44%,360px);height:min(38%,300px);border-radius:12px;border:2px solid #fff;overflow:hidden;z-index:0}
-.keys{font:12px var(--mono);color:var(--muted)}
-kbd{font:12px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--surface)}
-.rec{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4b3e;margin-right:6px;animation:blink 1.2s infinite}
+.badge{justify-self:center;font:700 12px/1 var(--font);letter-spacing:.08em;padding:8px 12px;border-radius:99px;background:#1d8656;color:#fff;white-space:nowrap;font-variant-numeric:tabular-nums}
+.badge.ready{background:#a86400}
+.badge.rec{background:#d0261b}
+.badge.off{background:#ffffff2e}
+.hudwarn{position:absolute;left:calc((100% - var(--railw)) / 2);top:calc(env(safe-area-inset-top,0px) + 62px);transform:translateX(-50%);background:#b3261ecc;color:#fff;padding:6px 12px;border-radius:8px;font-size:13px;width:max-content;max-width:88%;text-align:center}
+.guide{position:absolute;left:calc((100% - var(--railw)) / 2);top:calc(env(safe-area-inset-top,0px) + 62px);transform:translateX(-50%);background:#000c;color:#fff;border-radius:12px;padding:7px 12px;display:flex;gap:10px;align-items:center;width:max-content;max-width:min(88%,480px);font-size:13px;line-height:1.3}
+.guide .arrow{width:30px;height:30px;flex:none}
+.guide b{font-size:14px}
+.mini{position:absolute;right:calc(var(--railw) + 10px);top:calc(env(safe-area-inset-top,0px) + 110px);width:min(42%,340px);height:min(34%,280px);border-radius:12px;border:2px solid #fff;overflow:hidden;z-index:0}
+.drivestats{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(var(--railh) + 10px);font:600 13px/1.35 var(--mono);text-shadow:0 1px 3px #000;font-variant-numeric:tabular-nums;background:#0007;padding:6px 9px;border-radius:9px}
+.intro{position:absolute;left:calc((100% - var(--railw)) / 2);top:calc((100% - var(--railh)) / 2);transform:translate(-50%,-50%);width:min(330px,calc(100% - 32px - var(--railw)));background:#121815ec;border-radius:14px;padding:14px 16px;text-align:center;font-size:14px;line-height:1.45}
+.intro b{display:block;font-size:16px;margin-bottom:4px}
+.rail{position:absolute;left:0;right:0;bottom:0;height:var(--railh);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:0 max(12px,env(safe-area-inset-right,0px)) env(safe-area-inset-bottom,0px) max(12px,env(safe-area-inset-left,0px));background:#0b0f0d}
+.modes{display:inline-flex;background:#ffffff1f;border-radius:12px;padding:3px;gap:2px;justify-self:start}
+.modes button{border:0;background:none;color:#fff;opacity:.7;padding:8px 12px;border-radius:9px;font:600 14px var(--font);min-height:40px;cursor:pointer;white-space:nowrap}
+.modes button[aria-checked="true"]{background:#1d8656;opacity:1}
+.modes button:disabled{opacity:.3;cursor:not-allowed}
+.primary{width:74px;height:74px;border-radius:50%;border:4px solid #fff;background:transparent;display:grid;place-items:center;cursor:pointer;padding:0;color:#fff;transition:border-color .15s}
+.primary .lbl{display:block;transition:all .15s}
+.primary.start .lbl{font:700 15px var(--font)}
+.primary.shutter .lbl{width:58px;height:58px;border-radius:50%;background:#fff}
+.primary.shutter:active .lbl{transform:scale(.88)}
+.primary.record .lbl{width:56px;height:56px;border-radius:50%;background:#e5352b}
+.primary.stop{border-color:#e5352b}
+.primary.stop .lbl{width:28px;height:28px;border-radius:6px;background:#e5352b}
+.primary:focus-visible,.modes button:focus-visible,.toolbtn:focus-visible{outline:3px solid #7fb0ff;outline-offset:3px}
+.toolbtn{justify-self:end;width:48px;height:48px;border-radius:50%;border:0;background:#ffffff1f;color:#fff;display:grid;place-items:center;cursor:pointer}
+.toolbtn[aria-expanded="true"]{background:#fff;color:#000}
+.tools{position:absolute;right:calc(var(--railw) + max(12px,env(safe-area-inset-right,0px)));bottom:calc(var(--railh) + 10px);width:min(310px,calc(100% - 24px - var(--railw)));max-height:calc(100% - var(--railh) - 20px);overflow:auto;background:#121815f4;border:1px solid #ffffff2a;border-radius:14px;padding:6px;display:flex;flex-direction:column;z-index:5}
+.tools label,.tools button{display:flex;align-items:center;gap:10px;padding:10px;border:0;background:none;color:#fff;font:15px var(--font);text-align:left;border-radius:9px;cursor:pointer;min-height:44px}
+.tools label:hover,.tools button:hover{background:#ffffff14}
+.tools .hint{font-size:12px;opacity:.65;margin-left:auto;white-space:nowrap}
+.tools hr{border:0;border-top:1px solid #ffffff22;margin:4px 0;width:100%}
+.tools input[type=checkbox]{width:20px;height:20px;accent-color:#1d8656;flex:none}
+.rec{display:inline-block;width:9px;height:9px;border-radius:50%;background:#ff4b3e;margin-right:6px;animation:blink 1.2s infinite}
 @keyframes blink{50%{opacity:.25}}
-
+@media (orientation:landscape) and (max-height:600px){
+  body.cam nav.tabs{display:none}
+  #v-capture{--railw:calc(124px + env(safe-area-inset-right,0px));--railh:0px}
+  .rail{left:auto;top:0;width:var(--railw);height:100%;grid-template-columns:1fr;grid-template-rows:1fr auto 1fr;justify-items:center;padding:calc(env(safe-area-inset-top,0px) + 10px) env(safe-area-inset-right,0px) calc(env(safe-area-inset-bottom,0px) + 10px) 0}
+  .modes{flex-direction:column;justify-self:center;align-self:start}
+  .toolbtn{justify-self:center;align-self:end}
+  .tools{top:10px;bottom:auto;max-height:calc(100% - 20px)}
+  .drivestats{bottom:10px}
+  .hud .big{font-size:20px}
+}
+.measurebar{display:flex;gap:8px;align-items:center;background:var(--accent);color:var(--accent-fg);padding:8px 12px;border-radius:10px;margin-bottom:8px;font-weight:600}
+.measurebar .btn{margin-left:auto}
+.framebar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0 4px}
+.framebar .val{font:600 14px var(--mono);min-width:6ch;text-align:center}
 /* lists */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .svy{display:grid;grid-template-columns:84px 1fr;gap:10px;align-items:center;cursor:pointer;text-align:left}
@@ -118,6 +154,8 @@ kbd{font:12px var(--mono);border:1px solid var(--line);border-bottom-width:2px;b
 .mapbox{height:340px;border-radius:12px;border:1px solid var(--line);z-index:0}
 @media (min-width:820px){.mapbox{height:100%;min-height:340px}}
 .headbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+.headbar .adj{display:inline-flex;align-items:center;gap:4px;flex-wrap:nowrap;padding-right:6px}
+.headbar .val.small{font-size:13px;min-width:4.5ch}
 .headbar .val{font:600 18px var(--mono);min-width:5.5ch;text-align:center;font-variant-numeric:tabular-nums}
 .chg{display:grid;gap:8px}
 .chg .top{display:flex;gap:8px;align-items:center}
@@ -171,27 +209,22 @@ input[type=range]{width:100%}
     <canvas id="live"></canvas>
     <div class="crosshair"></div>
     <div class="hud">
-      <div><div class="big" id="hudHead">---°</div><div class="sub" id="hudHeadSub">compass off</div></div>
-      <div class="gps"><div class="big" id="hudAcc" style="font-size:22px">GPS</div><div class="sub" id="hudGpsSub">waiting</div></div>
+      <div><div class="big" id="hudHead">---°</div><div class="sub" id="hudHeadSub">sensors off</div></div>
+      <div class="badge off" id="modeBadge">ON FOOT</div>
+      <div class="gps"><div class="big" id="hudAcc">GPS</div><div class="sub" id="hudGpsSub">off</div></div>
     </div>
     <div class="hudwarn" id="hudWarn" hidden></div>
-    <div class="drivestats" id="driveStats" hidden></div>
     <div class="guide" id="guide" hidden></div>
     <div class="mini" id="mini" hidden></div>
-    <div class="start" id="startPane">
-      <h2 style="color:#fff">Survey a street</h2>
-      <p>Hold the phone upright, portrait or landscape. LocalityMap records where you stand and which way the camera faces, so each mark on a photo becomes a position on the map.</p>
-      <button class="btn primary" id="btnStartHand">On foot: start camera</button>
-      <button class="btn ghost" id="btnStartDrive">In the car: drive mode</button>
-      <label class="btn ghost">Import a photo<input type="file" accept="image/jpeg,image/*" id="importFile" hidden multiple></label>
-      <p class="small">Drive mode takes photos by itself. Mount the phone facing forward and set it up before you move.</p>
-    </div>
-    <div class="capbar" id="capBar" hidden>
-      <button class="btn" id="btnOverlay">Overlay</button>
-      <button class="shutter" id="btnShoot" aria-label="Take survey photo"></button>
-      <button class="btn" id="btnPlan" hidden>Plan</button>
-      <button class="btn" id="btnPause" hidden>Pause</button>
-      <button class="btn" id="btnStop">Stop</button>
+    <div class="drivestats" id="driveStats" hidden></div>
+    <div class="intro" id="intro"></div>
+    <div class="tools" id="tools" hidden></div>
+    <div class="rail">
+      <div class="modes" role="radiogroup" aria-label="Capture mode">
+        <button role="radio" data-m="hand" aria-checked="true">On foot</button><button role="radio" data-m="drive" aria-checked="false">Drive</button>
+      </div>
+      <button class="primary start" id="btnPrimary"><span class="lbl">Start</span></button>
+      <button class="toolbtn" id="btnTools" aria-label="More options" aria-expanded="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
     </div>
   </section>
   <section id="v-surveys" class="view" hidden></section>
@@ -213,7 +246,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -248,7 +281,7 @@ function twoTap(btn, label, fn) { let armed = false; btn.addEventListener('click
 
 /* ================= settings ================= */
 const DEFAULTS = { server: 'prod', clientId: '', hfov: 66, camHeight: 1.5, declination: 0, signin: 'redirect',
-  speedSwitch: 50, distStep: 15, timeStep: 2, minSpeed: 5, mountOffset: 0, carCamHeight: 1.3, liveOverlay: true, targetPasses: 2 };
+  speedSwitch: 50, distStep: 15, timeStep: 2, minSpeed: 5, mountOffset: 0, carCamHeight: 1.3, liveOverlay: true, targetPasses: 2, recordVideo: false };
 let S = Object.assign({}, DEFAULTS, loadLS('lm.settings', loadLS('gt.settings', {})));
 const SERVERS = {
   prod: { label: 'OpenStreetMap', api: 'https://api.openstreetmap.org', web: 'https://www.openstreetmap.org' },
@@ -262,14 +295,15 @@ function updateBadge() { const b = $('#srvBadge'); b.textContent = srv().label; 
 const store = (() => {
   let p;
   const open = () => p || (p = new Promise((res, rej) => {
-    const r = indexedDB.open('localitymap', 2);
-    r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains('obs')) d.createObjectStore('obs', { keyPath: 'id' }); if (!d.objectStoreNames.contains('cells')) d.createObjectStore('cells', { keyPath: 'key' }); };
+    const r = indexedDB.open('localitymap', 3);
+    r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains('obs')) d.createObjectStore('obs', { keyPath: 'id' }); if (!d.objectStoreNames.contains('cells')) d.createObjectStore('cells', { keyPath: 'key' }); if (!d.objectStoreNames.contains('trails')) d.createObjectStore('trails', { keyPath: 'trip' }); if (!d.objectStoreNames.contains('video')) d.createObjectStore('video', { keyPath: 'key' }); };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   }));
   const tx = async (name, mode, fn) => { const d = await open(); return new Promise((res, rej) => { const t = d.transaction(name, mode); const r = fn(t.objectStore(name)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); };
   return {
     put: (n, o) => tx(n, 'readwrite', s => s.put(o)), get: (n, k) => tx(n, 'readonly', s => s.get(k)),
-    all: n => tx(n, 'readonly', s => s.getAll()), del: (n, k) => tx(n, 'readwrite', s => s.delete(k))
+    all: n => tx(n, 'readonly', s => s.getAll()), del: (n, k) => tx(n, 'readwrite', s => s.delete(k)),
+    range: (n, lo, hi) => tx(n, 'readonly', s => s.getAll(IDBKeyRange.bound(lo, hi))), delRange: (n, lo, hi) => tx(n, 'readwrite', s => s.delete(IDBKeyRange.bound(lo, hi)))
   };
 })();
 const OBS = new Map();
@@ -398,8 +432,10 @@ function fovFor(w, h, hfovLong) {
   return { th, tv, hfov: 2 * Math.atan(th) * R2D, vfov: 2 * Math.atan(tv) * R2D };
 }
 const Hd = o => norm360(o.cam.heading0 + (o.cam.adj || 0));
+// tilt the camera up (+) or down (-) about its own right axis
+function tiltBasis(B, d) { if (!d) return B; const c = Math.cos(d * D2R), s = Math.sin(d * D2R); return { f: B.f.map((x, i) => x * c + B.u[i] * s), u: B.u.map((x, i) => x * c - B.f[i] * s), r: B.r }; }
 function obsCam(o) {
-  const B = o.cam.basis ? rotBasis(o.cam.basis, o.cam.adj || 0) : basisFromHeading(Hd(o), o.cam.elev || 0);
+  const B = tiltBasis(o.cam.basis ? rotBasis(o.cam.basis, o.cam.adj || 0) : basisFromHeading(Hd(o), o.cam.elev || 0), o.cam.tilt || 0);
   return { ...B, fov: fovFor(o.img.w, o.img.h, o.hfovLong), w: o.img.w, h: o.img.h, height: o.cam.height };
 }
 const rayDir = (C, x, y) => [0, 1, 2].map(i => C.f[i] + (2 * x - 1) * C.fov.th * C.r[i] + (1 - 2 * y) * C.fov.tv * C.u[i]);
@@ -414,7 +450,7 @@ function projSeg(C, A, B) {
 }
 const annBearing = (o, a) => headingOf(rayDir(obsCam(o), a.x, a.y));
 function tiltDistance(o, a) {
-  if (!o.cam.basis && o.cam.elev == null) return null;
+  if (!o.cam.basis && o.cam.elev == null && !o.cam.tilt) return null;
   const C = obsCam(o), d = rayDir(C, a.x, a.y), hz = Math.hypot(d[0], d[1]);
   const dep = -Math.atan2(d[2], hz) * R2D;
   if (dep < 1.5) return null;
@@ -488,6 +524,39 @@ function wayLabel(id, w) {
   if (!w) return 'way ' + id; const t = w.tags;
   const nm = t.name || t.ref || (t['addr:street'] && t['addr:housenumber'] ? t['addr:housenumber'] + ' ' + t['addr:street'] : null);
   return (nm ? nm + ' · ' : '') + (t.highway || (t.building ? 'building' : t.barrier || (t.bridge ? 'bridge' : 'way'))) + ' ' + id;
+}
+// Kerb-to-kerb width: the width tag if mapped, otherwise an estimate from lanes or road class
+const DEF_W = { motorway: 11, trunk: 10, primary: 10, secondary: 8.5, tertiary: 7.5, unclassified: 6.5, residential: 7, service: 4.5, living_street: 5.5, track: 3.5, road: 6.5, busway: 7, motorway_link: 6, trunk_link: 6, primary_link: 6, secondary_link: 6, tertiary_link: 6 };
+function roadWidth(t) {
+  const w = parseFloat(t.width); if (w > 1 && w < 60) return { w, est: false };
+  const l = parseInt(t.lanes, 10); if (l > 0) return { w: l * 3.3 + (t.highway === 'motorway' || t.highway === 'trunk' ? 2 : 0.6), est: true };
+  return { w: DEF_W[t.highway] || 6.5, est: true };
+}
+function roadLabel(t) { const rw = roadWidth(t); return [t.name || t.highway, t.lanes && 'lanes=' + t.lanes, rw.est ? '≈' + Math.round(rw.w) + ' m wide' : 'width=' + t.width, t.maxspeed && t.maxspeed + ' km/h'].filter(Boolean).join(' · '); }
+// Lines to draw for a way as seen by camera C: both kerbs (solid if width is mapped, dashed if estimated), the centreline, building footprints and roof outlines
+function featureLines(ctx, w, pr, C, maxD = 220) {
+  const pts = wayPts(ctx, w, pr), z0 = -C.height, out = [];
+  const proj = (A, B, z) => projSeg(C, [A[0], A[1], z], [B[0], B[1], z]);
+  const far = (A, B) => Math.hypot(...A) > maxD && Math.hypot(...B) > maxD;
+  if (isRoad(w.tags)) {
+    const { w: wd, est } = roadWidth(w.tags), half = wd / 2; const centre = [], kerbs = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const A = pts[i], B = pts[i + 1]; if (!A || !B || far(A, B)) continue;
+      const L = Math.hypot(B[0] - A[0], B[1] - A[1]); if (L < 0.01) continue;
+      const nx = (B[1] - A[1]) / L * half, ny = -(B[0] - A[0]) / L * half;
+      const c = proj(A, B, z0); if (c) centre.push(c);
+      for (const sg of [1, -1]) { const k = proj([A[0] + sg * nx, A[1] + sg * ny], [B[0] + sg * nx, B[1] + sg * ny], z0); if (k) kerbs.push(k); }
+    }
+    out.push({ kind: 'centre', dash: true, segs: centre }, { kind: 'kerb', dash: est, segs: kerbs });
+  } else if (w.tags.building) {
+    const bh = parseFloat(w.tags.height) || (parseFloat(w.tags['building:levels']) * 3.2) || null; const base = [], top = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const A = pts[i], B = pts[i + 1]; if (!A || !B || far(A, B)) continue;
+      const b = proj(A, B, z0); if (b) base.push(b); if (bh) { const t = proj(A, B, z0 + bh); if (t) top.push(t); }
+    }
+    out.push({ kind: 'bld', dash: false, segs: base }, { kind: 'bld', dash: true, segs: top });
+  }
+  return out;
 }
 const shortName = w => w ? (w.tags.name || w.tags.ref || w.tags.highway || 'unnamed') : '?';
 
@@ -713,9 +782,11 @@ function onPos(p) {
     const [e, n] = mkProj(prev.lat, prev.lon).fwd(c.latitude, c.longitude); const d = Math.hypot(e, n), dt = (t - prev.t) / 1000;
     if (speed == null && dt > 0 && dt < 5) speed = d / dt;
     if (course == null && d > 4 && dt < 5) course = headingOf([e, n, 0]);
-    if (drive.on && !drive.paused && dt < 10 && d < 300 && c.accuracy < 50) drive.odo += d;
+    if (drive.on && dt < 10 && d < 300 && c.accuracy < 50) drive.odo += d;
   }
-  sensors.pos = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, t };
+  sensors.pos = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, alt: c.altitude, altAcc: c.altitudeAccuracy, t };
+  const num = x => x != null && !isNaN(x) ? x : null;
+  if (drive.on && drive.trail) drive.trail.fixes.push({ t, lat: c.latitude, lon: c.longitude, acc: c.accuracy, alt: num(c.altitude), altAcc: num(c.altitudeAccuracy), speed: num(c.speed), course: num(c.heading) });
   sensors.speed = speed; sensors.course = course != null ? course : (speed > 2 ? sensors.course : null);
 }
 // position now, extrapolated along the GPS course since the last fix (fixes arrive about once a second)
@@ -733,18 +804,16 @@ function currentPose(isDrive) {
   if (!basis && H != null) basis = basisFromHeading(H, 0);
   return { basis, H, src, spread };
 }
-async function startSensors(mode) {
+async function startSensors() {
+  if (sensors.starting) return; sensors.starting = true;
   try { if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted') toast('Motion access was refused. Heading must then come from GPS or be set by hand.'); } } catch {}
   addEventListener('deviceorientationabsolute', onOrient); addEventListener('deviceorientation', onOrient);
   if ('geolocation' in navigator && sensors.geoId == null)
     sensors.geoId = navigator.geolocation.watchPosition(onPos, e => toast('Location unavailable: ' + e.message), { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
   await startCamera();
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
-  sensors.started = true; captureMode = mode;
-  $('#startPane').hidden = true; $('#capBar').hidden = false;
-  $('#btnPause').hidden = mode !== 'drive'; $('#btnPlan').hidden = mode !== 'drive'; $('#driveStats').hidden = mode !== 'drive'; $('#guide').hidden = true;
-  if (mode === 'drive') startDrive();
-  hudLoop();
+  sensors.started = true; sensors.starting = false;
+  hudLoop(); renderCaptureUI();
 }
 async function startCamera() {
   if (sensors.stream) return;
@@ -758,26 +827,85 @@ function stopAll() {
   if (drive.on) endDrive();
   stopCamera(); removeEventListener('deviceorientationabsolute', onOrient); removeEventListener('deviceorientation', onOrient);
   if (sensors.geoId != null) { navigator.geolocation.clearWatch(sensors.geoId); sensors.geoId = null; }
-  sensors.started = false; sensors.samples = []; sensors.abs = false; $('#startPane').hidden = false; $('#capBar').hidden = true; $('#driveStats').hidden = true; $('#hudWarn').hidden = true; $('#guide').hidden = true; if (miniOn) toggleMini();
+  sensors.started = false; sensors.samples = []; sensors.abs = false; sensors.pos = null;
   clearInterval(hudTimer); const c = $('#live'); c.getContext('2d').clearRect(0, 0, c.width, c.height);
+  $('#guide').hidden = true; $('#hudWarn').hidden = true; if (miniOn) toggleMini();
+  $('#hudHead').textContent = '---°'; $('#hudHeadSub').textContent = 'sensors off'; $('#hudAcc').textContent = 'GPS'; $('#hudGpsSub').textContent = 'off';
+  renderCaptureUI();
 }
 
-/* ================= capture HUD + live overlay ================= */
-let hudTimer, captureMode = 'hand', liveOn = S.liveOverlay;
+/* ================= capture screen ================= */
+let hudTimer, captureMode = loadLS('lm.mode', 'hand'), liveOn = S.liveOverlay, toolsOpen = false;
+const fmtDur = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function setMode(m) {
+  if (drive.on) return toast('End the drive first (the red stop button).');
+  captureMode = m; saveLS('lm.mode', m); if (m !== 'drive' && miniOn) toggleMini(); renderCaptureUI();
+}
+function renderBadge() {
+  const b = $('#modeBadge'), drv = captureMode === 'drive';
+  if (!sensors.started) { b.className = 'badge off'; b.textContent = (drv ? 'DRIVE' : 'ON FOOT') + ' · OFF'; }
+  else if (!drv) { b.className = 'badge'; b.textContent = 'ON FOOT'; }
+  else if (drive.on) { b.className = 'badge rec'; b.textContent = '● REC ' + fmtDur(Date.now() - drive.startedAt) + (drive.rec ? ' · VIDEO' : ''); }
+  else { b.className = 'badge ready'; b.textContent = 'DRIVE · READY'; }
+}
+function renderCaptureUI() {
+  const drv = captureMode === 'drive';
+  for (const b of document.querySelectorAll('.modes button')) { const on = b.dataset.m === captureMode; b.setAttribute('aria-checked', String(on)); b.disabled = drive.on && !on; }
+  renderBadge();
+  const pb = $('#btnPrimary');
+  pb.className = 'primary ' + (!sensors.started ? 'start' : !drv ? 'shutter' : drive.on ? 'stop' : 'record');
+  pb.querySelector('.lbl').textContent = sensors.started ? '' : (sensors.starting ? '…' : 'Start');
+  pb.setAttribute('aria-label', !sensors.started ? 'Start camera, compass and GPS' : !drv ? 'Take photo' : drive.on ? 'End drive' : 'Start recording the drive');
+  const intro = $('#intro'); intro.innerHTML = '';
+  if (!sensors.started) intro.append(h('b', {}, drv ? 'Drive mode' : 'On foot'), h('div', {}, drv
+    ? 'Mount the phone facing forward in landscape. Tap Start, then the red button to record. Photos are taken by themselves as you drive.'
+    : 'Tap Start, hold the phone upright in portrait or landscape, and photograph anything that is wrong or missing on the map.'));
+  else if (drv && !drive.on) intro.append(h('b', {}, 'Ready to record'), h('div', {}, 'Tap the red button before you set off. Tap it again (it becomes a square) to end the drive.'));
+  intro.hidden = !intro.childNodes.length;
+  $('#driveStats').hidden = !(drv && drive.on);
+  if (!drv) $('#guide').hidden = true;
+  if (toolsOpen) renderTools();
+}
+function onPrimary() {
+  if (!sensors.started) { const p = startSensors(); renderCaptureUI(); return p; }
+  if (captureMode === 'hand') return capture(false);
+  if (drive.on) endDrive(); else startDrive();
+  renderCaptureUI();
+}
+function toggleTools(force) { toolsOpen = force ?? !toolsOpen; $('#tools').hidden = !toolsOpen; $('#btnTools').setAttribute('aria-expanded', String(toolsOpen)); if (toolsOpen) renderTools(); }
+function renderTools() {
+  const t = $('#tools'); t.innerHTML = ''; const drv = captureMode === 'drive';
+  const tog = (label, checked, fn, hint, disabled) => { const i = h('input', { type: 'checkbox', checked, disabled }); i.onchange = () => fn(i.checked); return h('label', {}, i, label, hint ? h('span', { class: 'hint' }, hint) : null); };
+  t.append(tog('OSM roads on camera', liveOn, v => { liveOn = v; S.liveOverlay = v; saveSettings(); }));
+  if (drv) {
+    t.append(tog('Plan map', miniOn, () => toggleMini()));
+    t.append(tog('Record video too', !!S.recordVideo, v => { S.recordVideo = v; saveSettings(); }, drive.on ? 'set before recording' : `~${Math.round(VIDEO_BPS * 60 / 8e6)} MB/min`, drive.on));
+    if (drive.on) t.append(h('button', { onclick: () => capture(true).then(o => { if (o) { drive.count++; toast('Extra photo added to the drive.'); } }) }, 'Take an extra photo now'));
+  }
+  const imp = h('input', { type: 'file', accept: 'image/jpeg,image/*', multiple: true, hidden: true, onchange: e => { importFiles([...e.target.files]).catch(err => toast(err.message)); e.target.value = ''; toggleTools(false); } });
+  t.append(h('hr'), h('label', {}, imp, 'Import photos…'));
+  if (sensors.started) t.append(h('button', { onclick: () => { toggleTools(false); stopAll(); } }, 'Turn off camera and sensors'));
+  t.append(h('button', { onclick: () => { toggleTools(false); go('surveys'); } }, 'Go to Review'));
+}
 function hudLoop() {
   clearInterval(hudTimer);
   hudTimer = setInterval(() => {
-    if (view !== 'capture') return;
     const pose = currentPose(captureMode === 'drive');
+    if (drive.on && drive.trail && sensors.basis0) {
+      const r4 = v => v.map(x => Math.round(x * 1e4) / 1e4); const sh = smoothHeading();
+      drive.trail.orient.push({ t: Date.now(), f: r4(sensors.basis0.f), r: r4(sensors.basis0.r), u: r4(sensors.basis0.u), h0: Math.round(sensors.h0 * 10) / 10, H: sh ? Math.round(sh.h * 10) / 10 : null });
+    }
+    if (view !== 'capture') return;
+    renderBadge();
     $('#hudHead').textContent = pose.H != null ? Math.round(pose.H) + '° ' + card8(pose.H) : '---°';
-    let sub = pose.H == null ? (sensors.basis0 && sensors.iosOff == null ? 'hold upright in portrait to set compass' : 'no heading yet') : pose.src + (pose.spread > 4 ? ' · hold still' : '') + ' · tilt ' + Math.round(sensors.elev ?? 0) + '°';
+    const sub = pose.H == null ? (sensors.basis0 && sensors.iosOff == null ? 'hold upright in portrait to set compass' : 'no heading yet') : pose.src + (pose.spread > 4 ? ' · hold still' : '') + ' · tilt ' + Math.round(sensors.elev ?? 0) + '°';
     $('#hudHeadSub').textContent = sub; $('#hudHeadSub').className = 'sub' + (pose.H == null || pose.spread > 4 ? ' bad' : '');
     const p = sensors.pos;
     $('#hudAcc').textContent = p ? '±' + Math.round(p.acc) + ' m' : 'GPS';
     $('#hudGpsSub').textContent = p ? (p.acc > 15 ? 'weak fix' : 'good fix') + (sensors.speed != null ? ' · ' + Math.round(sensors.speed * 3.6) + ' km/h' : '') : 'waiting';
     $('#hudGpsSub').className = 'sub' + (p && p.acc > 15 ? ' bad' : '');
     const w = $('#hudWarn'); w.hidden = !sensors.rotMismatch; if (sensors.rotMismatch) w.textContent = 'The screen is not rotating with the phone. Turn off rotation lock so photos and headings match.';
-    if (captureMode === 'drive') { driveHud(); driveGuide(pose); }
+    if (captureMode === 'drive' && drive.on) { driveHud(); driveGuide(pose); }
     drawLive(pose);
   }, 200);
 }
@@ -790,23 +918,20 @@ function drawLive(pose) {
   const sc = Math.min(bw / v.videoWidth, bh / v.videoHeight), dw = v.videoWidth * sc, dh = v.videoHeight * sc;
   g.setTransform(dpr, 0, 0, dpr, (bw - dw) / 2 * dpr, (bh - dh) / 2 * dpr);
   const C = { ...pose.basis, fov: fovFor(dw, dh, S.hfov), w: dw, h: dh, height: captureMode === 'drive' ? S.carCamHeight : S.camHeight };
-  const pr = mkProj(p.lat, p.lon), z0 = -C.height; let label = null;
+  const pr = mkProj(p.lat, p.lon); let label = null;
   g.lineCap = 'round';
   for (const w of Object.values(ctx.ways)) {
     const road = isRoad(w.tags); if (!road && !w.tags.building) continue;
-    g.beginPath(); const pts = wayPts(ctx, w, pr);
-    for (let i = 0; i < pts.length - 1; i++) {
-      const A = pts[i], B = pts[i + 1]; if (!A || !B || (Math.hypot(...A) > 150 && Math.hypot(...B) > 150)) continue;
-      const s = projSeg(C, [A[0], A[1], z0], [B[0], B[1], z0]); if (!s) continue;
-      g.moveTo(s[0][0], s[0][1]); g.lineTo(s[1][0], s[1][1]);
-      if (road) { const d = nearestOnSeg([0, 0], A, B).d; const m = [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2]; if (m[0] > 0 && m[0] < dw && m[1] > 0 && m[1] < dh && (!label || d < label.d)) label = { d, x: m[0], y: m[1], w }; }
+    for (const ln of featureLines(ctx, w, pr, C, 150)) {
+      g.beginPath(); for (const sg of ln.segs) { g.moveTo(sg[0][0], sg[0][1]); g.lineTo(sg[1][0], sg[1][1]); }
+      g.setLineDash(ln.dash ? [8, 6] : []); g.strokeStyle = ln.kind === 'bld' ? 'rgba(255,143,208,.7)' : ln.kind === 'centre' ? 'rgba(56,224,168,.45)' : 'rgba(56,224,168,.95)'; g.lineWidth = ln.kind === 'kerb' ? 3.5 : 2; g.stroke();
     }
-    g.strokeStyle = road ? 'rgba(56,224,168,.9)' : 'rgba(255,143,208,.7)'; g.lineWidth = road ? 4 : 2; g.stroke();
+    if (road) { const pts = wayPts(ctx, w, pr); for (let i = 0; i < pts.length - 1; i++) { const A = pts[i], B = pts[i + 1]; if (!A || !B) continue; const s2 = projSeg(C, [A[0], A[1], -C.height], [B[0], B[1], -C.height]); if (!s2) continue; const d = nearestOnSeg([0, 0], A, B).d; const m = [(s2[0][0] + s2[1][0]) / 2, (s2[0][1] + s2[1][1]) / 2]; if (m[0] > 0 && m[0] < dw && m[1] > 0 && m[1] < dh && (!label || d < label.d)) label = { d, x: m[0], y: m[1], w }; } }
   }
-  if (label) { const t = label.w.tags; const txt = [t.name || t.highway, t.lanes && 'lanes=' + t.lanes, t.maxspeed && t.maxspeed + ' km/h'].filter(Boolean).join(' · ');
+  g.setLineDash([]);
+  if (label) { const txt = roadLabel(label.w.tags);
     g.font = '600 14px ui-monospace,Menlo,monospace'; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = '#000'; g.strokeText(txt, label.x, label.y); g.fillStyle = '#fff'; g.fillText(txt, label.x, label.y); }
 }
-
 /* ================= capture ================= */
 function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 const grabCanvas = document.createElement('canvas');
@@ -820,9 +945,9 @@ async function capture(isDrive) {
   const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', isDrive ? 0.82 : 0.88));
   const H = pose.H != null ? pose.H : 0;
   const o = {
-    id: newId(), created: new Date().toISOString(), kind: isDrive ? 'drive' : 'hand', trip: isDrive ? drive.trip : null,
+    id: newId(), created: new Date().toISOString(), kind: isDrive ? 'drive' : 'hand', trip: isDrive && drive.on ? drive.trip : null,
     photo: blob, img: { w: c.width, h: c.height }, hfovLong: Number(S.hfov),
-    cam: { lat: p.lat, lon: p.lon, acc: p.acc, speed: sensors.speed, course: sensors.course, heading0: H, adj: 0, headingSrc: pose.H != null ? pose.src : 'unknown', spread: pose.spread,
+    cam: { lat: p.lat, lon: p.lon, acc: p.acc, alt: p.alt ?? null, speed: sensors.speed, course: sensors.course, heading0: H, adj: 0, headingSrc: pose.H != null ? pose.src : 'unknown', spread: pose.spread,
       basis: pose.basis, elev: pose.basis ? Math.asin(clamp1(pose.basis.f[2])) * R2D : null, height: Number(isDrive ? S.carCamHeight : S.camHeight) },
     anns: []
   };
@@ -833,22 +958,31 @@ async function capture(isDrive) {
 }
 
 /* ================= drive mode ================= */
-const drive = { on: false, paused: false, trip: null, count: 0, lastPos: null, lastT: 0, busy: false, timer: null, wake: null, odo: 0, est: null };
+const drive = { on: false, trip: null, count: 0, lastPos: null, lastT: 0, busy: false, timer: null, wake: null, odo: 0, startedAt: 0, trail: null, rec: null };
 async function wakeLock() { try { if ('wakeLock' in navigator) { drive.wake = await navigator.wakeLock.request('screen'); } } catch { toast('Keep the screen on yourself: this browser would not hold a wake lock.'); } }
-document.addEventListener('visibilitychange', () => { if (drive.on && document.visibilityState === 'visible') wakeLock(); });
+document.addEventListener('visibilitychange', () => { if (drive.on && document.visibilityState === 'visible') wakeLock(); if (drive.on && document.visibilityState === 'hidden') saveTrail(); });
 function startDrive() {
-  Object.assign(drive, { on: true, paused: false, trip: 'trip-' + newId(), count: 0, lastPos: null, lastT: 0, odo: 0 });
-  const trips = loadLS('lm.trips', {}); trips[drive.trip] = { started: new Date().toISOString(), mountOffset: S.mountOffset }; saveLS('lm.trips', trips);
+  if (!sensors.started) return;
+  const trip = 'trip-' + newId();
+  Object.assign(drive, { on: true, trip, count: 0, lastPos: null, lastT: 0, odo: 0, startedAt: Date.now(), trail: { trip, fixes: [], orient: [] } });
+  const trips = loadLS('lm.trips', {}); trips[trip] = { started: new Date().toISOString(), mountOffset: S.mountOffset }; saveLS('lm.trips', trips);
   wakeLock(); clearInterval(drive.timer); drive.timer = setInterval(driveTick, 150);
-  $('#btnPause').textContent = 'Pause';
-  updateStorage();
+  clearInterval(drive.trailTimer); drive.trailTimer = setInterval(saveTrail, 15000);
+  if (S.recordVideo) startVideo();
+  updateStorage(); if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
 }
-function endDrive() {
-  clearInterval(drive.timer); drive.on = false; try { drive.wake && drive.wake.release(); } catch {}
-  if (drive.count) toast(`Trip saved: ${drive.count} photos over ${(drive.odo / 1000).toFixed(1)} km. Review them by road.`, 6000);
+async function endDrive() {
+  clearInterval(drive.timer); clearInterval(drive.trailTimer); drive.on = false; try { drive.wake && drive.wake.release(); } catch {}
+  stopVideo(); await saveTrail(); $('#guide').hidden = true;
+  const trip = drive.trip, n = drive.count, km = (drive.odo / 1000).toFixed(1);
+  renderCaptureUI(); if (navigator.vibrate) navigator.vibrate(80);
+  if (!n) return toast('Drive ended. No photos were taken (it only shoots above ' + S.minSpeed + ' km/h).');
+  toast(`Drive saved: ${n} photos over ${km} km. Refining positions from the GPS trail…`, 5000);
+  try { const r = await refineTrip(trip); if (r) toast(`Drive saved and refined: ${r.n} photos placed using the whole GPS trail.`, 6000); } catch (e) { toast('Drive saved; refining failed: ' + e.message); }
 }
+function saveTrail() { if (!drive.trail) return Promise.resolve(); return store.put('trails', drive.trail).catch(() => {}); }
 function driveTick() {
-  if (!drive.on || drive.paused || drive.busy) return;
+  if (!drive.on || drive.busy) return;
   const p = posNow(); if (!p) return;
   const kmh = (sensors.speed || 0) * 3.6; if (kmh < S.minSpeed) return;
   const now = Date.now(); let due;
@@ -863,10 +997,118 @@ let storageNote = '';
 async function updateStorage() { try { const e = await navigator.storage.estimate(); storageNote = Math.round(e.usage / 1e6) + ' MB used of ~' + Math.round(e.quota / 1e6) + ' MB'; } catch { storageNote = ''; } }
 function driveHud() {
   const kmh = (sensors.speed || 0) * 3.6;
-  const rule = kmh < S.minSpeed ? 'stopped, not shooting' : kmh < S.speedSwitch ? `every ${S.distStep} m` : `every ${S.timeStep} s`;
+  const rule = kmh < S.minSpeed ? 'slow: waiting' : kmh < S.speedSwitch ? `every ${S.distStep} m` : `every ${S.timeStep} s`;
   const el = $('#driveStats'); el.innerHTML = '';
-  el.append(h('div', {}, drive.paused ? 'PAUSED' : h('span', {}, h('span', { class: 'rec' }), 'REC')), h('div', {}, `${drive.count} photos · ${(drive.odo / 1000).toFixed(1)} km`), h('div', {}, rule), storageNote ? h('div', { class: 'small' }, storageNote) : null);
+  el.append(h('div', {}, `${drive.count} photos · ${(drive.odo / 1000).toFixed(1)} km`), h('div', {}, rule), storageNote ? h('div', { style: 'font-weight:400' }, storageNote) : null);
   if (drive.count && drive.count % 25 === 0) updateStorage();
+}
+
+/* ---- optional video of the drive ---- */
+const VIDEO_BPS = 2500000;
+function videoMime() { if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return ''; for (const m of ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']) if (MediaRecorder.isTypeSupported(m)) return m; return ''; }
+function startVideo() {
+  if (!sensors.stream || !window.MediaRecorder) return toast('This browser cannot record video; photos and the GPS trail are still recorded.');
+  const trip = drive.trip, mime = videoMime(); let seq = 0;
+  try {
+    const rec = new MediaRecorder(sensors.stream, mime ? { mimeType: mime, videoBitsPerSecond: VIDEO_BPS } : { videoBitsPerSecond: VIDEO_BPS });
+    rec.ondataavailable = e => { if (e.data && e.data.size) store.put('video', { key: trip + ':' + String(seq++).padStart(6, '0'), trip, blob: e.data }).catch(err => { toast('Video stopped: storage is full (' + err.message + ').'); stopVideo(); }); };
+    rec.onstart = () => { const trips = loadLS('lm.trips', {}); trips[trip] = Object.assign(trips[trip] || {}, { videoStart: Date.now(), videoMime: rec.mimeType || mime || 'video/mp4' }); saveLS('lm.trips', trips); };
+    rec.start(1000); drive.rec = rec;
+  } catch (e) { toast('Could not start video: ' + e.message); }
+}
+function stopVideo() { try { if (drive.rec && drive.rec.state !== 'inactive') drive.rec.stop(); } catch {} drive.rec = null; }
+const tripVids = new Map();
+async function tripVideo(trip) {
+  if (tripVids.has(trip)) return tripVids.get(trip);
+  const meta = loadLS('lm.trips', {})[trip]; if (!meta || !meta.videoStart) return null;
+  const chunks = await store.range('video', trip + ':', trip + ':￿'); if (!chunks.length) return null;
+  const blob = new Blob(chunks.map(c => c.blob), { type: (meta.videoMime || 'video/mp4').split(';')[0] });
+  const el = document.createElement('video'); el.muted = true; el.playsInline = true; el.preload = 'auto'; el.src = URL.createObjectURL(blob);
+  await new Promise((res, rej) => { el.onloadedmetadata = res; el.onerror = () => rej(new Error('This browser cannot read the recorded video.')); setTimeout(() => rej(new Error('The video took too long to open.')), 15000); });
+  if (!isFinite(el.duration)) { el.currentTime = 1e7; await new Promise(r => { el.ondurationchange = r; setTimeout(r, 3000); }); }
+  const v = { el, blob, start: meta.videoStart, mime: meta.videoMime }; tripVids.set(trip, v); return v;
+}
+async function videoFrame(trip, t) {
+  const v = await tripVideo(trip); if (!v) throw new Error('No video was recorded for this drive.');
+  const sec = (t - v.start) / 1000; if (sec < 0 || (isFinite(v.el.duration) && sec > v.el.duration)) throw new Error('That moment is outside the recorded video.');
+  await new Promise((res, rej) => { v.el.onseeked = res; setTimeout(() => rej(new Error('Could not seek in the video.')), 8000); v.el.currentTime = sec; });
+  const c = document.createElement('canvas'); c.width = v.el.videoWidth; c.height = v.el.videoHeight; c.getContext('2d').drawImage(v.el, 0, 0);
+  return { blob: await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9)), w: c.width, h: c.height };
+}
+
+/* ---- post-processing: Kalman filter + RTS smoother over the whole GPS trail ---- */
+const mT = A => A[0].map((_, j) => A.map(r => r[j]));
+const mMul = (A, B) => A.map(r => B[0].map((_, j) => r.reduce((s, x, k) => s + x * B[k][j], 0)));
+const mAdd = (A, B, sg = 1) => A.map((r, i) => r.map((x, j) => x + sg * B[i][j]));
+const mVec = (A, v) => A.map(r => r.reduce((s, x, k) => s + x * v[k], 0));
+function mInv(A) {
+  const n = A.length, M = A.map((r, i) => [...r, ...A.map((_, j) => i === j ? 1 : 0)]);
+  for (let c = 0; c < n; c++) { let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r; [M[c], M[p]] = [M[p], M[c]];
+    const d = M[c][c] || 1e-12; for (let j = 0; j < 2 * n; j++) M[c][j] /= d;
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c]; for (let j = 0; j < 2 * n; j++) M[r][j] -= f * M[c][j]; } }
+  return M.map(r => r.slice(n));
+}
+function smoothTrack(fixes) {
+  const F = []; for (const f of [...fixes].sort((a, b) => a.t - b.t)) if (f.acc != null && f.acc < 50 && isFinite(f.lat) && (!F.length || f.t > F[F.length - 1].t)) F.push(f);
+  if (F.length < 3) return null;
+  const pr = mkProj(F[0].lat, F[0].lon), q = 2.0 * 2.0;  // (m/s²)² of unmodelled acceleration
+  const Fm = dt => [[1, 0, dt, 0], [0, 1, 0, dt], [0, 0, 1, 0], [0, 0, 0, 1]];
+  const Qm = dt => { const a = dt ** 4 / 4 * q, b = dt ** 3 / 2 * q, c = dt * dt * q; return [[a, 0, b, 0], [0, a, 0, b], [b, 0, c, 0], [0, b, 0, c]]; };
+  const xf = [], Pf = [], xp = [], Pp = []; let x, P;
+  F.forEach((f, k) => {
+    const [e, n] = pr.fwd(f.lat, f.lon), r = Math.max(f.acc, 2) ** 2;
+    const vel = f.speed != null && f.speed > 1.5 && f.course != null ? [f.speed * Math.sin(f.course * D2R), f.speed * Math.cos(f.course * D2R)] : null;
+    if (k === 0) { x = [e, n, vel ? vel[0] : 0, vel ? vel[1] : 0]; P = [[r, 0, 0, 0], [0, r, 0, 0], [0, 0, vel ? 1 : 100, 0], [0, 0, 0, vel ? 1 : 100]]; }
+    else { const dt = (f.t - F[k - 1].t) / 1000, A = Fm(dt); x = mVec(A, x); P = mAdd(mMul(mMul(A, P), mT(A)), Qm(dt)); }
+    xp.push(x); Pp.push(P);
+    const H = vel ? [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]] : [[1, 0, 0, 0], [0, 1, 0, 0]];
+    const z = vel ? [e, n, vel[0], vel[1]] : [e, n]; const sv = 0.4 + 0.03 * f.speed;
+    const R = vel ? [[r, 0, 0, 0], [0, r, 0, 0], [0, 0, sv * sv, 0], [0, 0, 0, sv * sv]] : [[r, 0], [0, r]];
+    const Sx = mAdd(mMul(mMul(H, P), mT(H)), R), K = mMul(mMul(P, mT(H)), mInv(Sx));
+    const y = z.map((zi, i) => zi - mVec(H, x)[i]); x = x.map((xi, i) => xi + mVec(K, y)[i]);
+    P = mMul(mAdd([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], mMul(K, H), -1), P);
+    xf.push(x); Pf.push(P);
+  });
+  const xs = xf.slice();
+  for (let k = F.length - 2; k >= 0; k--) {
+    const A = Fm((F[k + 1].t - F[k].t) / 1000), Cg = mMul(mMul(Pf[k], mT(A)), mInv(Pp[k + 1]));
+    const d = xs[k + 1].map((v, i) => v - xp[k + 1][i]); xs[k] = xf[k].map((v, i) => v + mVec(Cg, d)[i]);
+  }
+  return { pr, t: F.map(f => f.t), x: xs, acc: F.map(f => f.acc), alt: F.map(f => f.alt) };
+}
+function sampleTrack(sm, t) {
+  const T = sm.t; if (t < T[0] - 2000 || t > T[T.length - 1] + 2000) return null;
+  let k = 0, hi = T.length - 1; while (hi - k > 1) { const m = (k + hi) >> 1; if (T[m] <= t) k = m; else hi = m; }
+  if (t > T[hi]) k = hi; const a = sm.x[k], b = sm.x[Math.min(k + 1, T.length - 1)];
+  const dt = Math.max(1e-3, (T[Math.min(k + 1, T.length - 1)] - T[k]) / 1000), s = Math.max(0, Math.min(1, (t - T[k]) / 1000 / dt));
+  const h00 = 2 * s ** 3 - 3 * s * s + 1, h10 = s ** 3 - 2 * s * s + s, h01 = -2 * s ** 3 + 3 * s * s, h11 = s ** 3 - s * s;
+  const e = h00 * a[0] + h10 * dt * a[2] + h01 * b[0] + h11 * dt * b[2], n = h00 * a[1] + h10 * dt * a[3] + h01 * b[1] + h11 * dt * b[3];
+  const ve = a[2] + (b[2] - a[2]) * s, vn = a[3] + (b[3] - a[3]) * s; const ll = sm.pr.inv(e, n);
+  return { lat: ll.lat, lon: ll.lon, speed: Math.hypot(ve, vn), course: headingOf([ve, vn, 0]), acc: Math.max(1.5, Math.min(sm.acc[k], sm.acc[Math.min(k + 1, T.length - 1)]) * 0.6) };
+}
+async function refineTrip(trip) {
+  const tr = await store.get('trails', trip).catch(() => null); if (!tr || tr.fixes.length < 5) return null;
+  const sm = smoothTrack(tr.fixes); if (!sm) return null;
+  const meta = loadLS('lm.trips', {})[trip] || {}; const mount = Number(meta.mountOffset ?? S.mountOffset ?? 0);
+  let n = 0;
+  for (const o of OBS.values()) {
+    if (o.trip !== trip) continue; const st = sampleTrack(sm, Date.parse(o.created)); if (!st) continue;
+    if (!o.cam.raw) o.cam.raw = { lat: o.cam.lat, lon: o.cam.lon, heading0: o.cam.heading0, headingSrc: o.cam.headingSrc };
+    o.cam.lat = st.lat; o.cam.lon = st.lon; o.cam.speed = st.speed; o.cam.acc = st.acc;
+    if (st.speed > 3) { const H = norm360(st.course + mount); if (o.cam.basis) o.cam.basis = rotBasis(o.cam.basis, angDiff(H, o.cam.heading0)); o.cam.heading0 = H; o.cam.course = st.course; o.cam.headingSrc = 'GPS trail (refined)'; }
+    o.cam.refined = true; o.anns.forEach(a => resolveAnn(o, a)); saveObs(o); n++;
+  }
+  roadCache.clear(); return { n };
+}
+// camera pose at any moment of a drive, for new photos taken from the video
+async function poseAt(trip, t, ref) {
+  const tr = await store.get('trails', trip).catch(() => null); const sm = tr && smoothTrack(tr.fixes); const st = sm && sampleTrack(sm, t);
+  const meta = loadLS('lm.trips', {})[trip] || {}; const mount = Number(meta.mountOffset ?? S.mountOffset ?? 0);
+  let basis = ref.cam.basis ? rotBasis(ref.cam.basis, ref.cam.adj || 0) : null, H = Hd(ref);
+  if (tr && tr.orient.length) { let best = tr.orient[0]; for (const s of tr.orient) if (Math.abs(s.t - t) < Math.abs(best.t - t)) best = s; if (Math.abs(best.t - t) < 1500) basis = { f: best.f, r: best.r, u: best.u }; if (best.H != null) H = best.H; }
+  if (st && st.speed > 3) H = norm360(st.course + mount);
+  if (basis) basis = rotBasis(basis, angDiff(H, headingOf(basis.f)));
+  return { lat: st ? st.lat : ref.cam.lat, lon: st ? st.lon : ref.cam.lon, acc: st ? st.acc : ref.cam.acc, speed: st ? st.speed : ref.cam.speed, course: st ? st.course : ref.cam.course, H, basis };
 }
 
 /* ================= import ================= */
@@ -963,10 +1205,10 @@ async function geotaggedJpeg(o) { const b = new Uint8Array(await o.photo.arrayBu
 /* ================= navigation ================= */
 let view = 'surveys', current = null, survTab = 'photos';
 function go(v) {
-  view = v;
+  view = v; document.body.classList.toggle('cam', v === 'capture'); if (v !== 'capture' && toolsOpen) toggleTools(false);
   for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'v-' + v;
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.v === v || (['detail', 'road', 'area', 'check'].includes(v) && b.dataset.v === 'surveys'));
-  if (v === 'capture') { if (sensors.started) startCamera(); } else if (!drive.on) stopCamera();
+  if (v === 'capture') { if (sensors.started) startCamera(); renderCaptureUI(); } else if (!drive.on) stopCamera();
   if (MAP) { MAP.remove(); MAP = null; }
   if (v === 'surveys') renderSurveys();
   if (v === 'upload') renderUpload();
@@ -1000,11 +1242,13 @@ function renderPhotos(v) {
     const g = h('div', { class: 'stack' });
     for (const [id, ps] of trips) {
       const c = counts(ps.flatMap(o => o.anns)); const box = h('div');
-      const del = twoTap(h('button', { class: 'btn small danger' }, 'Delete'), 'Delete', async () => { await deleteObs(ps); renderSurveys(); });
+      const del = twoTap(h('button', { class: 'btn small danger' }, 'Delete'), 'Delete', async () => { await deleteObs(ps); await store.del('trails', id).catch(() => {}); await store.delRange('video', id + ':', id + ':\uffff').catch(() => {}); tripVids.delete(id); renderSurveys(); });
       const card = h('div', { class: 'card' },
         h('div', { class: 'row' }, h('div', { style: 'flex:1;min-width:0' }, h('b', {}, 'Drive · ' + fmtDate(ps[ps.length - 1].created)), h('div', { class: 'muted small' }, ps.length + ' photos'), h('div', { class: 'row', style: 'gap:4px;margin-top:4px' }, statusPills(c))),
           h('button', { class: 'btn small', onclick: () => { box.innerHTML = ''; box.append(thumbGrid(ps.slice().reverse())); } }, 'Show photos'),
           h('button', { class: 'btn small', onclick: () => { survTab = 'roads'; renderSurveys(); } }, 'Review by road'),
+          h('button', { class: 'btn small', onclick: async () => { const r = await refineTrip(id).catch(e => toast(e.message)); toast(r ? `Refined ${r.n} photos from the GPS trail.` : 'No GPS trail was recorded for this drive (drives before version 0.4).'); renderSurveys(); } }, 'Refine'),
+          (loadLS('lm.trips', {})[id] || {}).videoStart ? h('button', { class: 'btn small', onclick: async () => { try { const v = await tripVideo(id); const ext = (v.mime || '').includes('webm') ? 'webm' : 'mp4'; shareFile(new File([v.blob], `localitymap-${id}.${ext}`, { type: v.blob.type })); } catch (e) { toast(e.message); } } }, 'Video') : null,
           h('button', { class: 'btn small', onclick: () => exportData(ps) }, 'Export'), del), box);
       g.append(card);
     }
@@ -1084,24 +1328,22 @@ function drawOverlay(svg, o, opts = {}) {
   const hl = opts.highlight || new Set(o.anns.map(a => a.wayId).filter(Boolean));
   if (opts.osm !== false && ctx) {
     const pr = mkProj(o.cam.lat, o.cam.lon), z0 = -C.height; const labels = [];
+    const pathOf = segs => segs.map(sg => `M${sg[0][0].toFixed(1)} ${sg[0][1].toFixed(1)}L${sg[1][0].toFixed(1)} ${sg[1][1].toFixed(1)}`).join('');
     for (const [id, way] of Object.entries(ctx.ways)) {
-      const road = isRoad(way.tags), bld = !!way.tags.building; if (!road && !bld) continue;
-      const pts = wayPts(ctx, way, pr); let d = '', dTop = '', best = null;
-      const bh = bld ? (parseFloat(way.tags.height) || (parseFloat(way.tags['building:levels']) * 3.2) || null) : null;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const A = pts[i], B = pts[i + 1]; if (!A || !B) continue;
-        if (Math.hypot(...A) > 220 && Math.hypot(...B) > 220) continue;
-        const seg = projSeg(C, [A[0], A[1], z0], [B[0], B[1], z0]); if (!seg) continue;
-        d += `M${seg[0][0].toFixed(1)} ${seg[0][1].toFixed(1)}L${seg[1][0].toFixed(1)} ${seg[1][1].toFixed(1)}`;
-        if (bh) { const t = projSeg(C, [A[0], A[1], z0 + bh], [B[0], B[1], z0 + bh]); if (t) dTop += `M${t[0][0].toFixed(1)} ${t[0][1].toFixed(1)}L${t[1][0].toFixed(1)} ${t[1][1].toFixed(1)}`; }
-        if (road) { const mx = (seg[0][0] + seg[1][0]) / 2, my = (seg[0][1] + seg[1][1]) / 2, dist = nearestOnSeg([0, 0], A, B).d;
-          if (mx > w * 0.05 && mx < w * 0.95 && my > H * 0.1 && my < H * 0.98 && (!best || dist < best.dist)) best = { x: mx, y: my, dist }; }
+      const road = isRoad(way.tags); if (!road && !way.tags.building) continue;
+      const on = hl.has(id), col = road ? (on ? '#ffd23f' : '#38e0a8') : '#ff8fd0';
+      for (const ln of featureLines(ctx, way, pr, C)) {
+        if (!ln.segs.length) continue;
+        const wdt = ln.kind === 'kerb' ? sw * (on ? 1.8 : 1.3) : sw * (ln.kind === 'centre' ? 0.7 : 1);
+        s += `<path d="${pathOf(ln.segs)}" stroke="${col}" stroke-width="${wdt}" fill="none" stroke-linecap="round" opacity="${ln.kind === 'centre' ? .55 : .9}"${ln.dash ? ` stroke-dasharray="${sw * 4} ${sw * 3}"` : ''}/>`;
       }
-      if (!d) continue;
-      const on = hl.has(id);
-      if (road) s += `<path d="${d}" stroke="${on ? '#ffd23f' : '#38e0a8'}" stroke-width="${sw * (on ? 2 : 1.4)}" fill="none" stroke-linecap="round" opacity=".9"/>`;
-      else s += `<path d="${d}" stroke="#ff8fd0" stroke-width="${sw}" fill="none" opacity=".75"/>` + (dTop ? `<path d="${dTop}" stroke="#ff8fd0" stroke-width="${sw}" stroke-dasharray="${sw * 3} ${sw * 2}" fill="none" opacity=".75"/>` : '');
-      if (road && best) { const t = way.tags; labels.push({ ...best, on, text: [t.name || t.highway, t.lanes && 'lanes=' + t.lanes, t.width && 'width=' + t.width, t.maxspeed && t.maxspeed + ' km/h'].filter(Boolean).join(' · ') }); }
+      if (road) {
+        const pts = wayPts(ctx, way, pr); let best = null;
+        for (let i = 0; i < pts.length - 1; i++) { const A = pts[i], B = pts[i + 1]; if (!A || !B) continue; const sg = projSeg(C, [A[0], A[1], z0], [B[0], B[1], z0]); if (!sg) continue;
+          const mx = (sg[0][0] + sg[1][0]) / 2, my = (sg[0][1] + sg[1][1]) / 2, dist = nearestOnSeg([0, 0], A, B).d;
+          if (mx > w * 0.05 && mx < w * 0.95 && my > H * 0.1 && my < H * 0.98 && (!best || dist < best.dist)) best = { x: mx, y: my, dist }; }
+        if (best) labels.push({ ...best, on, text: roadLabel(way.tags) });
+      }
     }
     for (const n of Object.values(ctx.nodes)) {
       if (!poiLabel(n.tags)) continue; const [e, nn] = pr.fwd(n.lat, n.lon); if (Math.hypot(e, nn) > 80) continue;
@@ -1235,22 +1477,31 @@ function renderDetail() {
     trip ? h('button', { class: 'btn small', disabled: ti <= 0, onclick: () => openDetail(trip[ti - 1].id) }, '‹ Prev') : null,
     trip ? h('button', { class: 'btn small', disabled: ti >= trip.length - 1, onclick: () => openDetail(trip[ti + 1].id) }, 'Next ›') : null,
     del));
-  detailPhoto = photoPane(o, { onTap: onPhotoTap, osm: showOSM });
+  detailPhoto = photoPane(o, { onTap: onPhotoTap, osm: showOSM, extra: measureExtra(o) });
+  if (measure && measure.o === o) v.append(h('div', { class: 'measurebar' }, measure.pts.length ? 'Now tap the other kerb' : 'Tap one kerb where it meets the road surface', h('button', { class: 'btn small', onclick: () => { const m = measure; measure = null; renderDetail(); openSheet(m.o, m.a, m.isNew, m.onDone, m.draft); } }, 'Cancel')));
   v.append(h('div', { class: 'panes' }, detailPhoto, h('div', { id: 'map', class: 'mapbox' })));
   const nudge = d => h('button', { class: 'btn small', onclick: () => { o.cam.adj = (o.cam.adj || 0) + d; recompute(); } }, (d > 0 ? '+' : '−') + Math.abs(d) + '°');
+  // move the camera sideways (perpendicular to where it looks): GPS is often a lane off
+  const shift = d => h('button', { class: 'btn small', 'aria-label': `Move camera ${Math.abs(d)} m ${d < 0 ? 'left' : 'right'}`, onclick: () => {
+    const b = (Hd(o) + 90) * D2R, ll = mkProj(o.cam.lat, o.cam.lon).inv(Math.sin(b) * d, Math.cos(b) * d);
+    o.cam.lat = ll.lat; o.cam.lon = ll.lon; o.cam.shift = Math.round(((o.cam.shift || 0) + d) * 100) / 100; o.cam.posSrc = 'adjusted'; loadFor(o).catch(() => {}); recompute(); } }, (d < 0 ? '◀ ' : '') + Math.abs(d) + ' m' + (d > 0 ? ' ▶' : ''));
+  const tilt = d => h('button', { class: 'btn small', 'aria-label': `Tilt ${d > 0 ? 'up' : 'down'} ${Math.abs(d)} degrees`, onclick: () => { o.cam.tilt = Math.round(((o.cam.tilt || 0) + d) * 10) / 10; recompute(); } }, d > 0 ? '▲' : '▼');
   v.append(h('div', { class: 'headbar' },
-    h('span', { class: 'muted small' }, 'Heading'), nudge(-5), nudge(-1), h('span', { class: 'val', id: 'headVal' }), nudge(1), nudge(5),
+    h('span', { class: 'adj' }, h('span', { class: 'muted small' }, 'Turn'), nudge(-5), nudge(-1), h('span', { class: 'val', id: 'headVal' }), nudge(1), nudge(5)),
+    h('span', { class: 'adj' }, h('span', { class: 'muted small' }, 'Shift'), shift(-1), shift(-0.25), shift(0.25), shift(1)),
+    h('span', { class: 'adj' }, h('span', { class: 'muted small' }, 'Tilt'), tilt(-0.5), h('span', { class: 'val small', id: 'tiltVal' }), tilt(0.5)),
     h('label', { class: 'toggle', style: 'margin-left:auto' }, h('input', { type: 'checkbox', checked: showOSM, onchange: e => { showOSM = e.target.checked; renderDetail(); } }), 'OSM on photo')));
   v.append(h('div', { id: 'tripFix' }));
-  v.append(h('p', { class: 'muted small', style: 'margin:0 0 6px' }, 'Tap the photo to mark something. Line up the green road lines with the real road using the heading buttons; every mark moves with it. Drag the camera or a point on the map to fine-tune.'));
+  if (o.trip && (loadLS('lm.trips', {})[o.trip] || {}).videoStart) v.append(frameBar(o));
+  v.append(h('p', { class: 'muted small', style: 'margin:0 0 6px' }, 'Tap the photo to mark something. The green lines are where OSM puts the kerbs (dashed when the width is only estimated). To line them up: Turn until the road runs the right way, Shift until the kerbs sit sideways in the right place, Tilt until the far kerbs meet at the right height. Every mark moves with it. Do this before measuring a width.'));
   v.append(h('div', { id: 'osmState' }));
   v.append(h('h3', {}, 'Changes'), h('div', { class: 'stack', id: 'changes' }));
   setTimeout(() => { buildDetailMap(); renderChanges(); updateCamInfo(); }, 0);
 }
 function updateCamInfo() {
   const o = current; if (!o || !$('#headVal')) return;
-  $('#headVal').textContent = Math.round(Hd(o)) + '°';
-  $('#camInfo').textContent = ` · GPS ${o.cam.acc ? '±' + Math.round(o.cam.acc) + ' m' : (o.cam.posSrc === 'unknown' ? 'position not set' : 'set by hand')} · heading from ${o.cam.headingSrc}${o.cam.adj ? ` ${o.cam.adj > 0 ? '+' : ''}${o.cam.adj}°` : ''}${o.cam.speed ? ' · ' + Math.round(o.cam.speed * 3.6) + ' km/h' : ''}`;
+  $('#headVal').textContent = Math.round(Hd(o)) + '°'; $('#tiltVal').textContent = (o.cam.tilt > 0 ? '+' : '') + (o.cam.tilt || 0).toFixed(1) + '°';
+  $('#camInfo').textContent = ` · GPS ${o.cam.acc ? '±' + Math.round(o.cam.acc) + ' m' : (o.cam.posSrc === 'unknown' ? 'position not set' : 'set by hand')} · heading from ${o.cam.headingSrc}${o.cam.adj ? ` ${o.cam.adj > 0 ? '+' : ''}${o.cam.adj}°` : ''}${o.cam.shift ? ` · moved ${o.cam.shift > 0 ? '+' : ''}${o.cam.shift} m sideways` : ''}${o.cam.refined ? ' · refined' : ''}${o.cam.speed ? ' · ' + Math.round(o.cam.speed * 3.6) + ' km/h' : ''}`;
   const st = $('#osmState'); st.innerHTML = ''; const ctx = osmOf(o);
   const reload = () => loadFor(o, true).then(() => { ctxCache.clear(); recompute(); }).catch(e => toast(e.message));
   if (!ctx) st.append(h('div', { class: 'warn row' }, 'OSM data for this spot is loading or unavailable offline.', h('button', { class: 'btn small', onclick: reload }, 'Retry')));
@@ -1275,11 +1526,59 @@ function renderChanges() {
 function onPhotoTap(ev, svg) {
   const o = current, rc = svg.getBoundingClientRect();
   const x = (ev.clientX - rc.left) / rc.width, y = (ev.clientY - rc.top) / rc.height;
+  if (measure && measure.o === o) return measureTap(x, y);
   const near = o.anns.find(a => Math.hypot(a.x - x, (a.y - y) * rc.height / rc.width) < 26 / rc.width);
   if (near) return openSheet(o, near, false, recompute);
   const a = { id: newId(), x, y, preset: null, values: {}, status: 'pending' };
   a.dist = tiltDistance(o, a); a.distSrc = a.dist ? 'tilt' : null; if (!a.dist) a.dist = 15;
   openSheet(o, a, true, recompute);
+}
+/* ---- tap both kerbs to measure road width ---- */
+let measure = null;
+function groundPoint(o, x, y) { const C = obsCam(o), d = rayDir(C, x, y); if (d[2] > -0.01) return null; const t = C.height / -d[2]; return [d[0] * t, d[1] * t]; }
+function startMeasure(o, a, draft, isNew, onDone) { $('#sheet').close(); measure = { o, a, draft, isNew, onDone, pts: [] }; if (current !== o) openDetail(o.id); else renderDetail(); $('#main').scrollTop = 0; }
+function measureTap(x, y) {
+  const m = measure; const g = groundPoint(m.o, x, y);
+  if (!g) return toast('That point is at or above the horizon. Tap where the kerb meets the road.');
+  m.pts.push({ x, y, g });
+  if (m.pts.length < 2) { renderDetail(); return; }
+  const [p1, p2] = m.pts; let w = Math.hypot(p2.g[0] - p1.g[0], p2.g[1] - p1.g[1]), across = null;
+  const ctx = osmOf(m.o), way = ctx && m.draft.wayId && ctx.ways[m.draft.wayId];
+  if (way) { // only the part across the road counts
+    const pr = mkProj(m.o.cam.lat, m.o.cam.lon), pts = wayPts(ctx, way, pr), mid = [(p1.g[0] + p2.g[0]) / 2, (p1.g[1] + p2.g[1]) / 2]; let best = null;
+    for (let i = 0; i < pts.length - 1; i++) { if (!pts[i] || !pts[i + 1]) continue; const r = nearestOnSeg(mid, pts[i], pts[i + 1]); if (!best || r.d < best.d) best = { d: r.d, A: pts[i], B: pts[i + 1] }; }
+    if (best) { const L = Math.hypot(best.B[0] - best.A[0], best.B[1] - best.A[1]); const nx = (best.B[1] - best.A[1]) / L, ny = -(best.B[0] - best.A[0]) / L; across = Math.abs((p2.g[0] - p1.g[0]) * nx + (p2.g[1] - p1.g[1]) * ny); }
+  }
+  const val = Math.round((across ?? w) * 10) / 10; const dist = Math.hypot(...p1.g) / 2 + Math.hypot(...p2.g) / 2;
+  m.draft.values = Object.assign({}, m.draft.values, { width: String(val) }); measure = null; renderDetail();
+  toast(`Measured ${val} m${across != null && Math.abs(across - w) > 0.3 ? ` across the road (${Math.round(w * 10) / 10} m between your taps)` : ''}. ${dist > 15 ? 'Those taps were far away; tilt errors grow with distance, so measure nearer the camera.' : 'Accuracy depends on the tilt: line up the kerbs first.'}`, 7000);
+  openSheet(m.o, m.a, m.isNew, m.onDone, m.draft);
+}
+function measureExtra(o) {
+  if (!measure || measure.o !== o) return '';
+  const C = obsCam(o), r = Math.max(10, C.w / 70), sw = Math.max(2, C.w / 300);
+  return measure.pts.map(p => `<circle cx="${p.x * C.w}" cy="${p.y * C.h}" r="${r}" fill="#ffd23f" stroke="#000" stroke-width="${sw}"/>`).join('');
+}
+
+/* ---- step through the drive video around this photo ---- */
+function frameBar(o) {
+  let off = 0; const label = h('span', { class: 'val' }, '+0.0 s'); const box = h('div');
+  const img = () => detailPhoto.querySelector('img'), svg = () => detailPhoto.querySelector('svg');
+  const show = async d => {
+    off = Math.round((off + d) * 10) / 10; label.textContent = (off >= 0 ? '+' : '') + off.toFixed(1) + ' s'; box.innerHTML = '';
+    if (!off) { img().src = photoURL(o); svg().style.display = ''; return; }
+    try { const f = await videoFrame(o.trip, Date.parse(o.created) + off * 1000); img().src = URL.createObjectURL(f.blob); svg().style.display = 'none'; box.dataset.ok = '1'; box.frame = f;
+      box.append(h('span', { class: 'muted small' }, 'Video frame (overlay hidden). '), h('button', { class: 'btn small primary', onclick: () => addFrame(o, off, f) }, 'Add as a new photo')); }
+    catch (e) { box.append(h('span', { class: 'err' }, e.message)); }
+  };
+  const b = d => h('button', { class: 'btn small', onclick: () => show(d) }, (d > 0 ? '+' : '−') + Math.abs(d) + ' s');
+  return h('div', { class: 'card', style: 'margin-bottom:8px' }, h('div', { class: 'framebar' }, h('b', { class: 'small' }, 'Video'), b(-1), b(-0.2), label, b(0.2), b(1), h('button', { class: 'btn small', onclick: () => show(-off) }, 'Back to photo')), box);
+}
+async function addFrame(ref, off, f) {
+  const t = Date.parse(ref.created) + off * 1000; const pose = await poseAt(ref.trip, t, ref);
+  const o = { id: newId(), created: new Date(t).toISOString(), kind: 'drive', trip: ref.trip, fromVideo: true, photo: f.blob, img: { w: f.w, h: f.h }, hfovLong: ref.hfovLong,
+    cam: { lat: pose.lat, lon: pose.lon, acc: pose.acc, speed: pose.speed, course: pose.course, heading0: pose.H, adj: ref.cam.adj || 0, headingSrc: 'video + GPS trail', basis: pose.basis, elev: pose.basis ? Math.asin(clamp1(pose.basis.f[2])) * R2D : null, height: ref.cam.height }, anns: [] };
+  OBS.set(o.id, o); await store.put('obs', o); toast('Added the video frame as a photo.'); openDetail(o.id);
 }
 function buildDetailMap() {
   const o = current; MAP = baseMap('map', [o.cam.lat, o.cam.lon], 19); mapLayer = L.layerGroup().addTo(MAP); drawDetailMap();
@@ -1536,7 +1835,7 @@ function drawMini(plan, p, nx) {
   MINI.setView([p.lat, p.lon], MINI.getZoom(), { animate: false });
 }
 function toggleMini() {
-  miniOn = !miniOn; $('#mini').hidden = !miniOn; $('#btnPlan').classList.toggle('on', miniOn);
+  miniOn = !miniOn; $('#mini').hidden = !miniOn;
   if (!miniOn && MINI) { MINI.remove(); MINI = null; } else { guideAt = 0; }
 }
 
@@ -1556,6 +1855,7 @@ async function importSurvey(file) {
   }
   for (const [k, list] of Object.entries(js.checks || {})) { const mine = CHECKS[k] || []; const by = new Map(mine.map(x => [x.o, x])); for (const x of list) { const m = by.get(x.o); if (!m || x.at > m.at) by.set(x.o, x); } CHECKS[k] = [...by.values()]; }
   saveChecks(); saveLS('lm.trips', Object.assign(loadLS('lm.trips', {}), js.trips || {}));
+  const tf = zip.file('trails.json'); if (tf) for (const tr of JSON.parse(await tf.async('string'))) { const mine = await store.get('trails', tr.trip).catch(() => null); if (!mine || mine.fixes.length < tr.fixes.length) await store.put('trails', tr).catch(() => {}); }
   roadCache.clear(); toast(`Imported: ${added} new photos, ${merged} updated${skipped ? `, ${skipped} skipped (photos not in this export and not on this device)` : ''}.`, 7000);
   go('surveys');
 }
@@ -1567,8 +1867,9 @@ function mergeObs(ex, rec) {
 }
 
 /* ================= mark sheet ================= */
-function openSheet(o, a, isNew, onDone) {
-  const d = $('#sheet'); const draft = JSON.parse(JSON.stringify(a)); d.innerHTML = '';
+function openSheet(o, a, isNew, onDone, draftIn) {
+  const d = $('#sheet'); const draft = draftIn || JSON.parse(JSON.stringify(a)); d.innerHTML = '';
+  sheetCtx = { o, a, isNew, onDone, draft };
   const body = h('div', { class: 'stack' });
   const done = () => { d.close(); onDone && onDone(); };
   const save = h('button', { class: 'btn primary', type: 'button', onclick: () => {
@@ -1586,6 +1887,7 @@ function openSheet(o, a, isNew, onDone) {
   sheetBody(o, draft, body);
   d.showModal();
 }
+let sheetCtx = null;
 function sheetBody(o, draft, body) {
   body.innerHTML = '';
   const locked = draft.status === 'uploaded';
@@ -1628,6 +1930,7 @@ function sheetBody(o, draft, body) {
     inp.addEventListener('change', () => { draft.values[f.k] = inp.value; });
     body.append(h('div', { class: 'field' }, h('label', { for: id }, f.label), h('span', { class: 'cur' }, P.type === 'way' ? (cur != null ? f.k + '=' + cur : f.k + ' not set') : f.k), inp));
   }
+  if (draft.preset === 'road' && view === 'detail' && target) body.append(h('button', { class: 'btn small', type: 'button', onclick: () => { const c = sheetCtx; startMeasure(c.o, c.a, c.draft, c.isNew, c.onDone); } }, 'Measure the width on the photo'));
   if (P.type === 'note') {
     const ta = h('textarea', { id: 'f-note', placeholder: 'e.g. Road was widened to 4 lanes in 2026; median added. Surveyed on site.' }, draft.text || '');
     ta.oninput = () => draft.text = ta.value;
@@ -1837,6 +2140,8 @@ async function exportData(list, withPhotos = true) {
     feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [o.cam.lon, o.cam.lat] }, properties: { id: o.id, created: o.created, heading: Math.round(Hd(o) * 10) / 10, marks: o.anns.length } });
   }
   zip.file('survey.json', JSON.stringify({ app: APP, exported: new Date().toISOString(), frame: 'ENU metres at each camera; basis vectors are unit vectors (east, north, up)', photos: meta, checks: CHECKS, trips: loadLS('lm.trips', {}), with_photos: withPhotos }));
+  const trails = []; for (const tid of new Set(list.map(o => o.trip).filter(Boolean))) { const tr = await store.get('trails', tid).catch(() => null); if (tr) trails.push(tr); }
+  zip.file('trails.json', JSON.stringify(trails));
   zip.file('cameras.geojson', JSON.stringify({ type: 'FeatureCollection', features: feats }));
   const blob = await zip.generateAsync({ type: 'blob' });
   $('#toast').hidden = true;
@@ -1887,15 +2192,9 @@ function renderSettings() {
 
 /* ================= boot ================= */
 for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => go(b.dataset.v));
-$('#btnStartHand').addEventListener('click', () => startSensors('hand'));
-$('#btnStartDrive').addEventListener('click', () => startSensors('drive'));
-$('#btnShoot').addEventListener('click', () => capture(captureMode === 'drive').then(o => { if (o && captureMode === 'drive') { drive.count++; toast('Photo added to the drive.'); } }));
-$('#btnStop').addEventListener('click', stopAll);
-$('#btnPlan').addEventListener('click', toggleMini);
-$('#btnPause').addEventListener('click', () => { drive.paused = !drive.paused; $('#btnPause').textContent = drive.paused ? 'Resume' : 'Pause'; });
-$('#btnOverlay').addEventListener('click', () => { liveOn = !liveOn; $('#btnOverlay').classList.toggle('on', liveOn); });
-$('#btnOverlay').classList.toggle('on', liveOn);
-$('#importFile').addEventListener('change', e => { importFiles([...e.target.files]).catch(err => toast(err.message)); e.target.value = ''; });
+$('#btnPrimary').addEventListener('click', onPrimary);
+$('#btnTools').addEventListener('click', () => toggleTools());
+for (const b of document.querySelectorAll('.modes button')) b.addEventListener('click', () => setMode(b.dataset.m));
 (async () => {
   updateBadge();
   try { for (const o of await store.all('obs')) { OBS.set(o.id, migrate(o)); o.anns.forEach(a => annSigs.set(a.id, annSig(a))); } } catch (e) { toast('Storage unavailable: ' + e.message); }

@@ -25,11 +25,21 @@ iPhone home-screen apps can't receive the sign-in redirect, so set *Sign-in meth
 
 ## 2. Capturing
 
+The Capture tab is a full-screen camera with three controls under the picture (beside it in landscape):
+
+| Control | What it does |
+|---|---|
+| **On foot \| Drive** switch | The active mode is filled green. Locked while a drive is recording. |
+| **Main button** | Its shape shows its job: **Start** (turns on camera, compass and GPS) → white disc (on foot: take a photo) or red dot (drive: start recording) → red square (end the drive). |
+| **⋯** | OSM roads on the camera, the plan map, video recording, an extra photo during a drive, importing photos, turning sensors off. |
+
+The badge at the top always says where you are: grey **OFF**, green **ON FOOT**, amber **DRIVE · READY**, red **● REC 12:03**.
+
 ### On foot
-*Capture → On foot.* Hold the phone upright in portrait or landscape. Wait for a good GPS fix and a steady heading, then shoot. Green lines drawn over the live camera are the roads OSM already has; if they don't sit on the real road, the heading is off (see Accuracy below).
+Tap Start, hold the phone upright in portrait or landscape, wait for a good GPS fix and a steady heading, and take the photo. Green lines over the camera are the kerbs OSM implies (see Accuracy).
 
 ### In the car (drive mode)
-*Capture → In the car.* Mount the phone facing forward in landscape, start drive mode before you move, then leave it alone.
+Switch to Drive, mount the phone facing forward in landscape, tap Start, then the red dot before you set off. Tap the red square to end the drive. Keep LocalityMap on screen while driving.
 
 | Speed | Rule (defaults, change in Settings) |
 |---|---|
@@ -37,10 +47,15 @@ iPhone home-screen apps can't receive the sign-in redirect, so set *Sign-in meth
 | 5–50 km/h | one photo every 15 m travelled |
 | above 50 km/h | one photo every 2 s |
 
-- **Heading** comes from the GPS course over the ground while moving above about 15 km/h, plus a *mount offset* for a phone that isn't pointing exactly forward. In-car compasses are unreliable (steel body, electronics, magnets in mounts), so the compass is only used when slow.
-- **Position** is extrapolated from the last GPS fix to the moment of the shot, since fixes arrive about once a second (at 60 km/h that's up to 17 m).
-- The screen is kept awake. iOS and Android stop web apps when the screen locks or you switch apps, so keep LocalityMap in front.
+- **Heading** comes from the GPS course over the ground while moving above about 15 km/h, plus a *mount offset* for a phone that isn't pointing exactly forward. In-car compasses are unreliable, so the compass is only used when slow.
+- **Trail**: every GPS fix (position, accuracy, altitude, speed, course) and the phone's orientation five times a second are recorded for the whole drive.
+- **Refine**: when the drive ends, the app smooths the whole trail with a Kalman smoother, which uses fixes before *and after* each photo, and re-places every photo from it. On a simulated bend with ordinary phone GPS this cut position error from about 4.6 m to 1.9 m and heading error from 3.4° to 1.4°. Older drives can be refined from their card in Review (only drives recorded with 0.4 or later have a trail).
+- **Video (optional)**: ⋯ → *Record video too*, set before you start recording. About 19 MB per minute. In review, a drive photo gets a **Video** bar to step ±0.2 s or ±1 s and *Add as a new photo*, for example to catch a sign at the best distance or a frame without motion blur. The new photo's position and orientation come from the refined trail. Video can't make frames sharper than the stills (the stills are frames from the same camera stream); it gives you every frame in between. The drive card's *Video* button saves the whole file.
+- The screen is kept awake. iOS and Android stop web apps when the screen locks or you switch apps.
 - Photos are about 300 KB each; the HUD shows storage used.
+
+### Import
+Photos from the gallery work too. iPhone photos usually carry position and camera direction in their EXIF data; others can be positioned on the map by hand.
 
 ### Repeat passes
 One pass is a guess; a second pass, ideally in the other direction, is a check. LocalityMap tracks every road you drive in 40 m stretches, per direction of travel, and counts how many separate drives covered each stretch (a photo covers the ~30 m the camera sees ahead). The goal is **2 passes in every direction traffic can use** (one-way streets, roundabouts and motorways only need their own direction); change it under Settings → *Passes wanted per direction*.
@@ -95,8 +110,18 @@ There's no automatic sync. That would need a server or a cloud drive connection,
 Tap the photo where the thing is and choose what it is (list below). The app traces your tap as a line of sight from the camera, finds the OSM road or building it hits, and for new points estimates the distance from the camera tilt (assumes flat ground and that you tapped the base of the object).
 
 ### Accuracy
-- **Heading**: the overlay draws OSM roads and building outlines (dashed = roof height from OSM tags) into the photo using the recorded camera pose. Use the heading buttons until the green lines sit on the real road. Every mark on that photo moves with it.
-- **Drive heading**: if a drive photo needs a correction, *Apply to drive* applies it to every GPS-course photo of that drive and stores it as the mount offset for future drives.
+OSM stores a road as one line down its middle. The overlay turns that into both **kerb lines** using the road's `width` tag (solid), or an estimate from its lane count or road type (dashed). Building footprints are pink, with their roof height dashed if OSM knows it. Line the kerbs up with the real ones using the three adjustments under the photo, in this order:
+
+1. **Turn**: until the road runs in the right direction.
+2. **Shift**: moves the camera sideways in 0.25 m or 1 m steps. GPS is often a lane or two off.
+3. **Tilt**: until the far kerbs meet at the right height. Phone tilt readings can be a degree out, and that matters.
+
+Every mark on the photo moves with these corrections.
+
+If the kerbs only line up when the lines are wider or narrower than the real road, OSM's width is wrong (or missing): fix it with the measure tool.
+
+- **Measuring width**: in a Road mark, *Measure the width on the photo*, then tap one kerb and then the other where they meet the road surface. Only the part across the road is counted. A 1° tilt error turns a 7.0 m road into 5.7 m at 15 m away, so line up the kerbs first and measure as close to the camera as you can. A tape measure is still better where it's safe.
+- **Drive heading**: if a drive photo needs a heading correction, *Apply to drive* applies it to every GPS-course photo of that drive and stores it as the mount offset for future drives.
 - **Position**: drag the blue camera arrow or any numbered point on the map. Esri imagery (licensed for OSM editing) is available in the map's layer switcher.
 - **Field of view**: if marks near the photo edges land consistently too far sideways, adjust *Camera field of view* in Settings.
 - **Declination**: compasses read magnetic north; enter your local declination in Settings.
@@ -190,7 +215,8 @@ What BeamNG.Earth uses today comes from its README (roads with lanes, widths, sp
 
 | Data | Where it goes | Why |
 |---|---|---|
-| Position, GPS accuracy, speed, GPS course | `survey.json`, photo EXIF | re-locate photos later; Panoramax/Mapillary upload |
+| Position, GPS accuracy, speed, GPS course, altitude | `survey.json`, photo EXIF | re-locate photos later; Panoramax/Mapillary upload |
+| Full GPS trail and orientation samples for each drive | `trails.json` | re-run better smoothing; video frame positions |
 | Camera direction, tilt and roll (full orientation as three vectors) | `survey.json`, direction in EXIF | rebuild the view for 3D/AR work |
 | Heading source and any manual correction | `survey.json` | judge reliability |
 | Field of view, camera height | `survey.json` | measurements from photos |
@@ -208,8 +234,8 @@ The web app is fine for the survey-review-upload loop. These are the limits you'
 |---|---|---|
 | iPhone Safari gives an ambiguous compass value in landscape | LocalityMap learns the compass offset while you hold the phone upright in portrait or flat, then carries it into landscape with the gyroscope. It needs that portrait moment after each start. | Core Motion `xTrueNorthZVertical` gives full orientation against true north in any pose |
 | App is suspended when the screen locks or you switch apps | Drive mode must stay on screen | Background location; a foreground-only camera session is still needed, but it survives notifications |
-| No control over shutter speed, focus or lens; no lens calibration | Motion blur at speed, estimated field of view | AVFoundation: fast shutter, fixed focus, per-frame camera intrinsics, ultra-wide lens |
-| GPS about 1 Hz, no sensor fusion with motion | Positions between fixes are extrapolated | ARKit visual-inertial tracking gives centimetre-level relative motion between photos |
+| No control over shutter speed, focus or lens; no lens calibration | Motion blur at speed, estimated field of view; video is compressed frames of the same stream | AVFoundation: fast shutter, fixed focus, per-frame camera intrinsics, ultra-wide lens |
+| GPS about 1 Hz, no raw satellite data, no barometer | Live positions are extrapolated; after the drive, the trail smoother fixes most of it. Altitude is GPS-only (±10 m or worse) | ARKit visual-inertial tracking gives centimetre-level relative motion between photos |
 | No AR on iPhone browsers (WebXR AR is Android Chrome only) | The live overlay is a projection of flat ground, not true AR | ARKit: plane detection, depth (LiDAR on Pro models), anchored 3D overlays |
 | Only one app runs in front, and web apps pause in the background | No turn-by-turn navigation alongside capture | CarPlay or in-app navigation in the native capture app |
 | On-device detection of signs, poles and lanes is slow in the browser | Everything is marked and checked by hand | Core ML runs detection on every frame in real time |

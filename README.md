@@ -110,6 +110,16 @@ From the labels the app works out:
 
 With *Line photos up automatically* on (Settings → Vision), every analysed photo corrects its own turn, tilt and sideways position against the OSM road, so there's no slider work. *What the app sees* on a photo shows the labels; *Undo* restores the original pose.
 
+**The feature map.** The road sheet's map shows:
+- the OSM road with the kerbs it implies (orange; dashed when the width is only estimated)
+- every kerb point the camera measured, from every photo (yellow)
+- objects already in OSM (blue)
+- the objects the camera found, as circles numbered by how many photos saw them
+
+Tap a circle to see where each photo placed it, with a sight line back to that photo's camera. A tight bunch from several passes means a reliable position. Drag the circle to adjust it before pressing *Add*. Each photo's page map shows that photo's own kerb points and objects.
+
+**On phones.** Analysis frees memory between photos, and if a photo runs out of memory or the graphics chip stops responding, it retries at lighter settings (or on the processor) instead of failing. The result tells you how many photos succeeded, how many needed the lighter settings, and how many failed. For a full drive at best quality, a computer is still the better place.
+
 **Kerb height needs two directions.** A kerb's apparent width in a photo depends on its height, its top width and how far it is sideways from the camera, so one viewpoint can't separate height from width. Driving the road both ways sees each kerb from about 2 m and about 5 m away, and the app fits height and top width from those views. In testing this recovered a 150 mm barrier kerb and an 80 mm mountable kerb to within 3 mm. With only one direction you get a rough height, labelled as such, and no `kerb` suggestion.
 
 **What it doesn't do automatically:**

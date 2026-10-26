@@ -84,6 +84,12 @@ h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute
 .capbar .btn.on{background:#fff;color:#000}
 .start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;overflow:auto}
 .start p{max-width:40ch;opacity:.85;margin:0}
+.guide{position:absolute;left:50%;top:78px;transform:translateX(-50%);background:#000b;color:#fff;border-radius:12px;padding:8px 12px;display:flex;gap:10px;align-items:center;max-width:min(92%,520px);font-size:14px;line-height:1.3}
+.guide .arrow{width:34px;height:34px;flex:none}
+.guide b{font-size:15px}
+.mini{position:absolute;right:max(10px,env(safe-area-inset-right,0px));top:150px;width:min(44%,360px);height:min(38%,300px);border-radius:12px;border:2px solid #fff;overflow:hidden;z-index:0}
+.keys{font:12px var(--mono);color:var(--muted)}
+kbd{font:12px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--surface)}
 .rec{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4b3e;margin-right:6px;animation:blink 1.2s infinite}
 @keyframes blink{50%{opacity:.25}}
 
@@ -170,6 +176,8 @@ input[type=range]{width:100%}
     </div>
     <div class="hudwarn" id="hudWarn" hidden></div>
     <div class="drivestats" id="driveStats" hidden></div>
+    <div class="guide" id="guide" hidden></div>
+    <div class="mini" id="mini" hidden></div>
     <div class="start" id="startPane">
       <h2 style="color:#fff">Survey a street</h2>
       <p>Hold the phone upright, portrait or landscape. LocalityMap records where you stand and which way the camera faces, so each mark on a photo becomes a position on the map.</p>
@@ -181,6 +189,7 @@ input[type=range]{width:100%}
     <div class="capbar" id="capBar" hidden>
       <button class="btn" id="btnOverlay">Overlay</button>
       <button class="shutter" id="btnShoot" aria-label="Take survey photo"></button>
+      <button class="btn" id="btnPlan" hidden>Plan</button>
       <button class="btn" id="btnPause" hidden>Pause</button>
       <button class="btn" id="btnStop">Stop</button>
     </div>
@@ -189,6 +198,7 @@ input[type=range]{width:100%}
   <section id="v-detail" class="view" hidden></section>
   <section id="v-road" class="view" hidden></section>
   <section id="v-area" class="view" hidden></section>
+  <section id="v-check" class="view" hidden></section>
   <section id="v-upload" class="view" hidden></section>
   <section id="v-settings" class="view settings" hidden></section>
 </main>
@@ -203,7 +213,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -238,7 +248,7 @@ function twoTap(btn, label, fn) { let armed = false; btn.addEventListener('click
 
 /* ================= settings ================= */
 const DEFAULTS = { server: 'prod', clientId: '', hfov: 66, camHeight: 1.5, declination: 0, signin: 'redirect',
-  speedSwitch: 50, distStep: 15, timeStep: 2, minSpeed: 5, mountOffset: 0, carCamHeight: 1.3, liveOverlay: true };
+  speedSwitch: 50, distStep: 15, timeStep: 2, minSpeed: 5, mountOffset: 0, carCamHeight: 1.3, liveOverlay: true, targetPasses: 2 };
 let S = Object.assign({}, DEFAULTS, loadLS('lm.settings', loadLS('gt.settings', {})));
 const SERVERS = {
   prod: { label: 'OpenStreetMap', api: 'https://api.openstreetmap.org', web: 'https://www.openstreetmap.org' },
@@ -264,7 +274,10 @@ const store = (() => {
 })();
 const OBS = new Map();
 const saveTimers = {};
-function saveObs(o) { clearTimeout(saveTimers[o.id]); saveTimers[o.id] = setTimeout(() => store.put('obs', o).catch(e => toast('Could not save: ' + e.message)), 250); }
+const annSigs = new Map();
+const annSig = a => JSON.stringify([a.status, a.preset, a.values, a.wayId, a.lat, a.lon, a.text, a.x, a.y, a.dist]);
+function stampAnns(o) { for (const a of o.anns) { const sg = annSig(a); if (annSigs.get(a.id) !== sg) { if (annSigs.has(a.id) || !a.updated) a.updated = Date.now(); annSigs.set(a.id, sg); } } }
+function saveObs(o) { stampAnns(o); o.updated = Date.now(); clearTimeout(saveTimers[o.id]); saveTimers[o.id] = setTimeout(() => store.put('obs', o).catch(e => toast('Could not save: ' + e.message)), 250); }
 const photoURLs = new Map();
 const photoURL = o => { if (!photoURLs.has(o.id)) photoURLs.set(o.id, URL.createObjectURL(o.photo)); return photoURLs.get(o.id); };
 async function deleteObs(list) { for (const o of list) { OBS.delete(o.id); await store.del('obs', o.id); const u = photoURLs.get(o.id); if (u) { URL.revokeObjectURL(u); photoURLs.delete(o.id); } } }
@@ -565,30 +578,95 @@ function annWarnings(o, a) {
   return out;
 }
 
-/* road the camera was on (drive) or looking along (on foot) */
+/* road the camera was on (drive) or looking along (on foot), the direction along it, and the distance along it */
 const roadCache = new Map();
-function roadOf(o) {
+function roadInfo(o, noCache) {
   const ck = o.id + ':' + o.cam.lat.toFixed(6) + ':' + Hd(o).toFixed(1);
-  if (roadCache.has(ck)) return roadCache.get(ck);
+  if (!noCache && roadCache.has(ck)) return roadCache.get(ck);
   const ctx = osmOf(o); if (!ctx) return null;
-  const pr = mkProj(o.cam.lat, o.cam.lon); const H = Hd(o); let best = null;
+  const pr = mkProj(o.cam.lat, o.cam.lon); const H = Hd(o);
+  const move = o.kind === 'drive' && o.cam.course != null && o.cam.speed > 2 ? o.cam.course : H;
+  let best = null;
   for (const [id, w] of Object.entries(ctx.ways)) {
-    if (!isRoad(w.tags)) continue; const pts = wayPts(ctx, w, pr);
+    if (!isRoad(w.tags)) continue; const pts = wayPts(ctx, w, pr); let acc = 0;
     for (let i = 0; i < pts.length - 1; i++) {
       const A = pts[i], B = pts[i + 1]; if (!A || !B) continue;
-      let score;
+      const L = Math.hypot(B[0] - A[0], B[1] - A[1]); const sb = headingOf([B[0] - A[0], B[1] - A[1], 0]);
+      let score, u;
       if (o.kind === 'drive') {
-        const n = nearestOnSeg([0, 0], A, B); if (n.d > 25) continue;
-        const sb = headingOf([B[0] - A[0], B[1] - A[1], 0]); const al = Math.min(Math.abs(angDiff(sb, H)), 180 - Math.abs(angDiff(sb, H)));
-        if (al > 40) continue; score = n.d + al * 0.3;
+        const n = nearestOnSeg([0, 0], A, B); if (n.d > 25) { acc += L; continue; }
+        const al = Math.min(Math.abs(angDiff(sb, move)), 180 - Math.abs(angDiff(sb, move)));
+        if (al > 40) { acc += L; continue; } score = n.d + al * 0.3; u = n.u;
       } else {
         const r = raySeg(H, A, B); const n = nearestOnSeg([0, 0], A, B);
-        score = r && r.t < 80 ? r.t : (n.d < 20 ? 100 + n.d : null); if (score == null) continue;
+        if (r && r.t < 80) { score = r.t; u = r.u; } else if (n.d < 20) { score = 100 + n.d; u = n.u; } else { acc += L; continue; }
       }
-      if (!best || score < best.s) best = { s: score, id };
+      if (!best || score < best.score) best = { score, id, s: acc + u * L, dir: Math.abs(angDiff(sb, move)) < 90 ? 'fwd' : 'back' };
+      acc += L;
     }
   }
-  const id = best ? best.id : null; roadCache.set(ck, id); return id;
+  const out = best ? { id: best.id, dir: best.dir, s: best.s } : null; if (!noCache) roadCache.set(ck, out); return out;
+}
+const roadOf = o => { const r = roadInfo(o); return r ? r.id : null; };
+// way geometry with distance along it (same skipping rule as roadInfo, so distances match)
+function wayGeom(ctx, w) {
+  const out = []; let s = 0, prev = null;
+  for (const id of w.nds) { const n = ctx.nodes[id]; if (!n) { prev = null; continue; } if (prev) s += Math.hypot(...mkProj(prev.lat, prev.lon).fwd(n.lat, n.lon)); out.push({ lat: n.lat, lon: n.lon, s, id }); prev = n; }
+  return out;
+}
+function posAt(g, s) {
+  for (let i = 0; i < g.length - 1; i++) if (s <= g[i + 1].s) { const t = (s - g[i].s) / Math.max(1e-6, g[i + 1].s - g[i].s); return { lat: g[i].lat + (g[i + 1].lat - g[i].lat) * t, lon: g[i].lon + (g[i + 1].lon - g[i].lon) * t }; }
+  return g.length ? g[g.length - 1] : null;
+}
+const BOUND = { N: 'northbound', NE: 'north-eastbound', E: 'eastbound', SE: 'south-eastbound', S: 'southbound', SW: 'south-westbound', W: 'westbound', NW: 'north-westbound' };
+
+/* ================= repeat passes: coverage per road, direction and 40 m stretch ================= */
+const BIN = 40;
+function passPlan() {
+  const W = new Map(), trips = new Map();
+  for (const o of OBS.values()) if (o.kind === 'drive' && o.trip) { if (!trips.has(o.trip)) trips.set(o.trip, []); trips.get(o.trip).push(o); }
+  const ent = (id, o) => { if (!W.has(id)) { const ctx = osmOf(o); W.set(id, { id, way: ctx.ways[id], ctx, bins: { fwd: new Map(), back: new Map() }, photos: 0, trips: new Set() }); } return W.get(id); };
+  const mark = (e, dir, b, trip) => { const m = e.bins[dir]; if (!m.has(b)) m.set(b, new Set()); m.get(b).add(trip); e.trips.add(trip); };
+  for (const [trip, list] of trips) {
+    list.sort((a, b) => a.created.localeCompare(b.created)); let prev = null;
+    for (const o of list) {
+      const ri = roadInfo(o); if (!ri) { prev = null; continue; }
+      const e = ent(ri.id, o); e.photos++;
+      // a photo also covers the stretch the camera sees ahead (about 30 m)
+      const ahead = s0 => ri.dir === 'fwd' ? [s0, s0 + 30] : [s0 - 30, s0];
+      let [lo, hi] = ahead(ri.s);
+      if (prev && prev.id === ri.id && prev.dir === ri.dir && Math.abs(ri.s - prev.s) < 150) { const [plo, phi] = ahead(prev.s); lo = Math.min(lo, plo); hi = Math.max(hi, phi); }
+      for (let k = Math.floor(Math.max(0, lo) / BIN); k <= Math.floor(Math.max(0, hi) / BIN); k++) mark(e, ri.dir, k, trip);
+      prev = ri;
+    }
+  }
+  const target = Math.max(1, Number(S.targetPasses) || 2);
+  for (const e of W.values()) {
+    const t = e.way.tags; e.geom = wayGeom(e.ctx, e.way); e.len = e.geom.length ? e.geom[e.geom.length - 1].s : 0;
+    const one = t.oneway === 'yes' || t.oneway === '1' || t.oneway === 'true' || t.junction === 'roundabout' || (t.highway === 'motorway' && t.oneway !== 'no');
+    e.need = one ? ['fwd'] : t.oneway === '-1' ? ['back'] : ['fwd', 'back'];
+    e.plan = [...new Set([...e.bins.fwd.keys(), ...e.bins.back.keys()])].filter(b => b * BIN < e.len || e.len === 0).sort((a, b) => a - b);
+    const g = e.geom, bear = g.length > 1 ? headingOf([...mkProj(g[0].lat, g[0].lon).fwd(g[g.length - 1].lat, g[g.length - 1].lon), 0]) : 0;
+    e.dirName = { fwd: BOUND[card8(bear)], back: BOUND[card8(bear + 180)] };
+    e.status = {};
+    for (const d of e.need) {
+      const counts = e.plan.map(b => (e.bins[d].get(b) || new Set()).size);
+      e.status[d] = { met: counts.filter(c => c >= target).length, total: e.plan.length, min: Math.min(...counts), max: Math.max(...counts), unmet: e.plan.filter((b, i) => counts[i] < target) };
+    }
+    e.done = e.need.every(d => e.status[d].met === e.status[d].total);
+    e.target = target;
+  }
+  return [...W.values()];
+}
+// nearest stretch still needing a pass, from where you are
+function nextPass(plan, p) {
+  let best = null;
+  for (const e of plan) for (const d of e.need) for (const b of e.status[d].unmet) {
+    const pt = posAt(e.geom, (b + 0.5) * BIN); if (!pt) continue;
+    const dist = Math.hypot(...mkProj(p.lat, p.lon).fwd(pt.lat, pt.lon));
+    if (!best || dist < best.dist) best = { e, d, pt, dist };
+  }
+  return best;
 }
 
 /* ================= sensors ================= */
@@ -664,7 +742,7 @@ async function startSensors(mode) {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
   sensors.started = true; captureMode = mode;
   $('#startPane').hidden = true; $('#capBar').hidden = false;
-  $('#btnPause').hidden = mode !== 'drive'; $('#driveStats').hidden = mode !== 'drive';
+  $('#btnPause').hidden = mode !== 'drive'; $('#btnPlan').hidden = mode !== 'drive'; $('#driveStats').hidden = mode !== 'drive'; $('#guide').hidden = true;
   if (mode === 'drive') startDrive();
   hudLoop();
 }
@@ -680,7 +758,7 @@ function stopAll() {
   if (drive.on) endDrive();
   stopCamera(); removeEventListener('deviceorientationabsolute', onOrient); removeEventListener('deviceorientation', onOrient);
   if (sensors.geoId != null) { navigator.geolocation.clearWatch(sensors.geoId); sensors.geoId = null; }
-  sensors.started = false; sensors.samples = []; sensors.abs = false; $('#startPane').hidden = false; $('#capBar').hidden = true; $('#driveStats').hidden = true; $('#hudWarn').hidden = true;
+  sensors.started = false; sensors.samples = []; sensors.abs = false; $('#startPane').hidden = false; $('#capBar').hidden = true; $('#driveStats').hidden = true; $('#hudWarn').hidden = true; $('#guide').hidden = true; if (miniOn) toggleMini();
   clearInterval(hudTimer); const c = $('#live'); c.getContext('2d').clearRect(0, 0, c.width, c.height);
 }
 
@@ -699,7 +777,7 @@ function hudLoop() {
     $('#hudGpsSub').textContent = p ? (p.acc > 15 ? 'weak fix' : 'good fix') + (sensors.speed != null ? ' · ' + Math.round(sensors.speed * 3.6) + ' km/h' : '') : 'waiting';
     $('#hudGpsSub').className = 'sub' + (p && p.acc > 15 ? ' bad' : '');
     const w = $('#hudWarn'); w.hidden = !sensors.rotMismatch; if (sensors.rotMismatch) w.textContent = 'The screen is not rotating with the phone. Turn off rotation lock so photos and headings match.';
-    if (captureMode === 'drive') driveHud();
+    if (captureMode === 'drive') { driveHud(); driveGuide(pose); }
     drawLive(pose);
   }, 200);
 }
@@ -887,7 +965,7 @@ let view = 'surveys', current = null, survTab = 'photos';
 function go(v) {
   view = v;
   for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'v-' + v;
-  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.v === v || (['detail', 'road', 'area'].includes(v) && b.dataset.v === 'surveys'));
+  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.v === v || (['detail', 'road', 'area', 'check'].includes(v) && b.dataset.v === 'surveys'));
   if (v === 'capture') { if (sensors.started) startCamera(); } else if (!drive.on) stopCamera();
   if (MAP) { MAP.remove(); MAP = null; }
   if (v === 'surveys') renderSurveys();
@@ -907,10 +985,11 @@ function thumbGrid(list) {
 function renderSurveys() {
   const v = $('#v-surveys'); v.innerHTML = '';
   const seg = h('div', { class: 'seg', role: 'tablist' });
-  for (const [k, l] of [['photos', 'Photos'], ['roads', 'By road'], ['areas', 'By area']]) seg.append(h('button', { class: survTab === k ? 'on' : '', role: 'tab', onclick: () => { survTab = k; renderSurveys(); } }, l));
-  v.append(seg);
+  for (const [k, l] of [['photos', 'Photos'], ['roads', 'By road'], ['areas', 'By area'], ['passes', 'Passes']]) seg.append(h('button', { class: survTab === k ? 'on' : '', role: 'tab', onclick: () => { survTab = k; renderSurveys(); } }, l));
+  const imp = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ''; if (f) importSurvey(f).catch(err => toast('Import failed: ' + err.message, 7000)); } });
+  v.append(h('div', { class: 'row', style: 'justify-content:space-between;align-items:flex-start' }, seg, h('label', { class: 'btn small' }, 'Import from another device', imp)));
   if (!OBS.size) { v.append(h('div', { class: 'card empty' }, h('p', {}, 'No photos yet.'), h('button', { class: 'btn primary', onclick: () => go('capture') }, 'Start capturing'))); return; }
-  ({ photos: renderPhotos, roads: renderRoads, areas: renderAreas })[survTab](v);
+  ({ photos: renderPhotos, roads: renderRoads, areas: renderAreas, passes: renderPasses })[survTab](v);
 }
 function renderPhotos(v) {
   const list = [...OBS.values()].sort((a, b) => b.created.localeCompare(a.created));
@@ -1024,6 +1103,11 @@ function drawOverlay(svg, o, opts = {}) {
       else s += `<path d="${d}" stroke="#ff8fd0" stroke-width="${sw}" fill="none" opacity=".75"/>` + (dTop ? `<path d="${dTop}" stroke="#ff8fd0" stroke-width="${sw}" stroke-dasharray="${sw * 3} ${sw * 2}" fill="none" opacity=".75"/>` : '');
       if (road && best) { const t = way.tags; labels.push({ ...best, on, text: [t.name || t.highway, t.lanes && 'lanes=' + t.lanes, t.width && 'width=' + t.width, t.maxspeed && t.maxspeed + ' km/h'].filter(Boolean).join(' · ') }); }
     }
+    for (const n of Object.values(ctx.nodes)) {
+      if (!poiLabel(n.tags)) continue; const [e, nn] = pr.fwd(n.lat, n.lon); if (Math.hypot(e, nn) > 80) continue;
+      const b = toImg(C, [e, nn, z0]), t = toImg(C, [e, nn, z0 + 3]); if (!b || !t || b[0] < 0 || b[0] > w || b[1] < 0 || b[1] > H * 1.1) continue;
+      s += `<line x1="${b[0].toFixed(1)}" y1="${b[1].toFixed(1)}" x2="${t[0].toFixed(1)}" y2="${t[1].toFixed(1)}" stroke="#7fd4ff" stroke-width="${sw}" opacity=".8"/><circle cx="${b[0].toFixed(1)}" cy="${b[1].toFixed(1)}" r="${sw * 2.2}" fill="none" stroke="#7fd4ff" stroke-width="${sw}"/>`;
+    }
     const fs = Math.max(12, w / 55);
     labels.sort((a, b) => (b.on - a.on) || a.dist - b.dist).slice(0, 4).forEach(l => {
       s += `<text x="${l.x.toFixed(0)}" y="${l.y.toFixed(0)}" font-size="${fs}" font-family="ui-monospace,Menlo,monospace" fill="#fff" stroke="#000" stroke-width="${fs / 5}" paint-order="stroke" text-anchor="middle">${esc(l.text)}</text>`;
@@ -1039,7 +1123,7 @@ function drawOverlay(svg, o, opts = {}) {
     s += `<circle cx="${x}" cy="${y}" r="${r}" fill="${col[a.status] || '#f2a100'}" stroke="#fff" stroke-width="${sw}"/>`;
     s += `<text x="${x}" y="${y + r * .38}" font-size="${r * 1.05}" font-weight="700" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" fill="${a.status === 'pending' ? '#1b1300' : '#fff'}">${i + 1}</text>`;
   });
-  svg.innerHTML = s;
+  svg.innerHTML = s + (opts.extra || '');
 }
 function photoPane(o, opts = {}) {
   const photo = h('div', { class: 'photo' }, h('img', { src: photoURL(o), alt: 'Survey photo' }));
@@ -1065,6 +1149,8 @@ function changeCard(o, a, idx, refresh) {
   }
   if (P.type !== 'way' && a.lat != null) c.append(h('div', { class: 'muted mono' }, `${a.lat.toFixed(6)}, ${a.lon.toFixed(6)} · ${fmtM(a.dist)} at ${Math.round(a.bearing ?? 0)}°${a.manual ? ' · placed by hand' : a.distSrc === 'tilt' ? ' · distance from tilt' : ''}`));
   if (P.type === 'note') c.append(h('div', {}, a.text || h('span', { class: 'muted' }, '(empty note)')));
+  if (P.type === 'node') { const vd = verdicts('m' + a.id); if (vd.seen || vd.gone) c.querySelector('.top').append(vd.seen ? h('span', { class: 'pill approved' }, 'seen again ×' + vd.seen) : null, vd.gone ? h('span', { class: 'pill conflict' }, 'missing ×' + vd.gone) : null);
+    if (vd.gone && !vd.seen) c.append(h('div', { class: 'err' }, 'Not visible on a later pass. Check the original photo before approving.')); }
   if (a.status === 'merged') c.append(h('div', { class: 'muted small' }, 'Merged into the road sheet for this road.'));
   else annWarnings(o, a).forEach(x => c.append(h('div', { class: 'warn' }, x)));
   if (a.status === 'uploaded') c.append(h('div', { class: 'muted' }, a.result || 'Uploaded'));
@@ -1077,6 +1163,62 @@ function changeCard(o, a, idx, refresh) {
       a.status !== 'approved' ? h('button', { class: 'btn small primary', onclick: () => set('approved') }, 'Approve') : h('button', { class: 'btn small', onclick: () => set('pending') }, 'Undo approval')));
   }
   return c;
+}
+
+/* ================= expected vs seen ================= */
+const POI = [['highway', 'traffic_signals', 'Traffic signals'], ['highway', 'stop', 'Stop sign'], ['highway', 'give_way', 'Give way sign'], ['highway', 'crossing', 'Crossing'],
+  ['highway', 'street_lamp', 'Street light'], ['power', 'pole', 'Power pole'], ['man_made', 'utility_pole', 'Utility pole'], ['traffic_sign', null, 'Traffic sign'],
+  ['traffic_calming', null, 'Traffic calming'], ['highway', 'bus_stop', 'Bus stop'], ['emergency', 'fire_hydrant', 'Fire hydrant'], ['barrier', 'toll_booth', 'Toll booth'],
+  ['man_made', 'street_cabinet', 'Street cabinet'], ['natural', 'tree', 'Tree']];
+const poiLabel = t => { for (const [k, v, l] of POI) if (t[k] && (v == null || t[k] === v)) return l; return null; };
+let CHECKS = loadLS('lm.checks', {});
+const saveChecks = () => saveLS('lm.checks', CHECKS);
+function verdicts(key) {
+  const list = CHECKS[key] || []; const by = v => new Set(list.filter(x => x.v === v).map(x => x.trip)).size;
+  return { seen: by('seen'), gone: by('gone'), unsure: by('unsure'), n: list.length };
+}
+// what should be visible along a road: OSM point objects near it, plus your own new points
+function expectedFor(group) {
+  const ctxs = group.photos.map(osmOf).filter(Boolean); if (!ctxs.length) return [];
+  const ctx = ctxs.find(c => c.ways[group.id]) || ctxs[0]; const w = ctx.ways[group.id]; if (!w) return [];
+  const g = wayGeom(ctx, w); const out = new Map();
+  const nearWay = (lat, lon) => { const pr = mkProj(lat, lon); let m = Infinity; for (let i = 0; i < g.length - 1; i++) m = Math.min(m, nearestOnSeg([0, 0], pr.fwd(g[i].lat, g[i].lon), pr.fwd(g[i + 1].lat, g[i + 1].lon)).d); return m; };
+  for (const c of ctxs) for (const [id, n] of Object.entries(c.nodes)) {
+    if (out.has('n' + id)) continue; const l = poiLabel(n.tags); if (!l) continue;
+    if (nearWay(n.lat, n.lon) > 25) continue;
+    out.set('n' + id, { key: 'n' + id, label: l, osmId: id, tags: n.tags, lat: n.lat, lon: n.lon });
+  }
+  for (const o of OBS.values()) for (const a of o.anns) {
+    const P = PRESETS[a.preset]; if (!P || P.type !== 'node' || a.lat == null || ['rejected', 'merged'].includes(a.status)) continue;
+    if (a.wayId !== group.id && nearWay(a.lat, a.lon) > 25) continue;
+    out.set('m' + a.id, { key: 'm' + a.id, label: 'Your ' + P.label.toLowerCase(), mark: a, origin: o, lat: a.lat, lon: a.lon });
+  }
+  return [...out.values()];
+}
+// photos in which an object should be visible, best first; the photo it was marked on doesn't count
+function viewsOf(obj) {
+  const out = [];
+  for (const o of OBS.values()) {
+    if (obj.origin === o) continue;
+    const [e, n] = mkProj(o.cam.lat, o.cam.lon).fwd(obj.lat, obj.lon); const d = Math.hypot(e, n); if (d > 70) continue;
+    const C = obsCam(o); const p = toImg(C, [e, n, -C.height]); if (!p) continue;
+    if (p[2] < 4 || p[2] > 60 || p[0] < C.w * 0.03 || p[0] > C.w * 0.97 || p[1] < C.h * 0.05 || p[1] > C.h) continue;
+    const top = toImg(C, [e, n, -C.height + 4]);
+    const sameTrip = obj.origin && obj.origin.trip && obj.origin.trip === o.trip;
+    out.push({ o, p, top, score: Math.abs(p[2] - 18) + (sameTrip ? 40 : 0) });
+  }
+  return out.sort((a, b) => a.score - b.score);
+}
+function recordVerdict(obj, view, v) {
+  const list = (CHECKS[obj.key] || []).filter(x => x.o !== view.o.id);
+  list.push({ o: view.o.id, v, trip: view.o.trip || view.o.id, at: Date.now() }); CHECKS[obj.key] = list; saveChecks();
+}
+function goneNote(obj) {
+  const ids = (CHECKS[obj.key] || []).filter(x => x.v === 'gone'); const last = OBS.get(ids[ids.length - 1].o); if (!last) return;
+  const view = viewsOf(obj).find(vw => vw.o === last); const C = obsCam(last);
+  const a = { id: newId(), x: view ? view.p[0] / C.w : 0.5, y: view ? view.p[1] / C.h : 0.7, preset: 'note', values: {}, status: 'pending', lat: obj.lat, lon: obj.lon, manual: true, dist: 0,
+    text: `${obj.label} mapped here (node ${obj.osmId}, ${Object.entries(obj.tags).map(([k, v]) => k + '=' + v).join(' ')}) was not visible in ${new Set(ids.map(x => x.trip)).size} separate passes (${[...new Set(ids.map(x => OBS.get(x.o)?.created.slice(0, 10)).filter(Boolean))].join(', ')}). It has probably been removed.` };
+  last.anns.push(a); saveObs(last); toast('Note added to review. Edit or approve it in the list below.');
 }
 
 /* ================= photo detail ================= */
@@ -1186,6 +1328,9 @@ function renderRoad() {
   const o = x.photos[roadState.idx]; const t = x.way ? x.way.tags : {};
   v.append(h('div', { class: 'dhead' }, h('button', { class: 'btn small', onclick: () => { survTab = 'roads'; go('surveys'); } }, '← Roads'),
     h('div', { class: 'title' }, h('b', {}, shortName(x.way)), h('span', { class: 'muted small' }, (t.highway || '') + ' · way ' + x.id + ' · ' + x.photos.length + ' photos'))));
+  const pe = passPlan().find(e => e.id === x.id);
+  v.append(h('div', { class: 'row', style: 'gap:4px;margin-bottom:8px' }, pe ? passChips(pe) : h('span', { class: 'pill' }, 'no drive passes yet'),
+    h('button', { class: 'btn small primary', style: 'margin-left:auto', onclick: () => openCheck(x.id) }, 'Check against passes')));
   v.append(h('div', { class: 'tagchips', style: 'margin-bottom:10px' }, Object.entries(t).filter(([k]) => !k.startsWith('name:') && !k.startsWith('source')).map(([k, val]) => h('span', {}, k + '=' + val))));
   const pane = photoPane(o, { highlight: new Set([x.id]) });
   v.append(h('div', { class: 'panes' }, h('div', {}, pane,
@@ -1250,6 +1395,175 @@ function renderArea() {
   x.marks.forEach((m, i) => list.append(changeCard(m.o, m.a, i + 1, renderArea)));
   if (!x.marks.length) list.append(h('p', { class: 'muted' }, 'No marks in this area yet. Open a photo to add some.'));
   v.append(h('h3', {}, 'Changes'), list, h('h3', {}, 'Photos'), thumbGrid(x.photos));
+}
+
+/* ================= passes view ================= */
+function passChips(e) {
+  return e.need.map(d => { const st = e.status[d]; const full = st.met === st.total;
+    return h('span', { class: 'pill ' + (full ? 'approved' : st.min === 0 ? 'rejected' : 'pending') }, `${e.dirName[d]} ${st.min === st.max ? st.min : st.min + '–' + st.max}/${e.target}${full ? ' ✓' : ' · ' + Math.round(st.met / Math.max(1, st.total) * 100) + '%'}`); });
+}
+function renderPasses(v) {
+  const plan = passPlan();
+  v.append(h('p', { class: 'muted small' }, `Each stretch of road you've driven needs ${Math.max(1, Number(S.targetPasses) || 2)} passes in every direction traffic can use (change in Settings). Drive mode shows the nearest one still needed. Then check each road against the other passes.`));
+  if (!plan.length) { v.append(h('p', { class: 'muted' }, 'No drives matched to roads yet. Drive once in drive mode and the plan fills itself in.')); return; }
+  v.append(h('div', { id: 'passmap', class: 'mapbox', style: 'height:320px;margin-bottom:12px' }));
+  plan.sort((a, b) => (a.done - b.done) || b.photos - a.photos);
+  const list = h('div', { class: 'stack' });
+  for (const e of plan) list.append(h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('b', { style: 'flex:1;min-width:0' }, shortName(e.way)), h('span', { class: 'muted small' }, `${e.trips.size} drive${e.trips.size > 1 ? 's' : ''} · ${Math.round(e.plan.length * BIN)} m surveyed`)),
+    h('div', { class: 'row', style: 'gap:4px;margin:6px 0' }, passChips(e)),
+    h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: () => openRoad(e.id) }, 'Road sheet'), h('button', { class: 'btn small primary', onclick: () => openCheck(e.id) }, 'Check against passes'))));
+  v.append(list);
+  setTimeout(() => {
+    MAP = baseMap('passmap', [plan[0].geom[0].lat, plan[0].geom[0].lon], 15); const all = [];
+    for (const e of plan) { const ll = e.geom.map(g => [g.lat, g.lon]); all.push(...ll);
+      const col = e.done ? '#1d8656' : e.need.some(d => e.status[d].min === 0) ? '#b3261e' : '#f2a100';
+      L.polyline(ll, { color: col, weight: 6, opacity: .8 }).bindTooltip(shortName(e.way)).on('click', () => openRoad(e.id)).addTo(MAP); }
+    if (all.length) MAP.fitBounds(all, { padding: [20, 20], maxZoom: 17 });
+  }, 0);
+}
+
+/* ================= check view: expected vs seen ================= */
+let checkState = null;
+function openCheck(id) {
+  const group = roadGroups().groups.find(g => g.id === id); if (!group) return toast('No photos on this road.');
+  const items = expectedFor(group).map(obj => ({ obj, views: viewsOf(obj) })).filter(x => x.views.length);
+  const ctx = group.photos.map(osmOf).find(c => c && c.ways[id]); const g = ctx ? wayGeom(ctx, ctx.ways[id]) : [];
+  const along = x => { const pr = mkProj(x.obj.lat, x.obj.lon); let best = 0, bd = Infinity; g.forEach(pt => { const d = Math.hypot(...pr.fwd(pt.lat, pt.lon)); if (d < bd) { bd = d; best = pt.s; } }); return best; };
+  items.sort((a, b) => along(a) - along(b));
+  checkState = { id, way: group.way, items, i: 0, vi: 0, done: false };
+  go('check'); renderCheck();
+}
+function renderCheck() {
+  const v = $('#v-check'); v.innerHTML = ''; const st = checkState; if (!st) return;
+  v.append(h('div', { class: 'dhead' }, h('button', { class: 'btn small', onclick: () => openRoad(st.id) }, '← Road'),
+    h('div', { class: 'title' }, h('b', {}, 'Check ' + shortName(st.way)), h('span', { class: 'muted small' }, st.done ? 'summary' : `object ${st.i + 1} of ${st.items.length}`)),
+    !st.done ? h('button', { class: 'btn small', onclick: () => { st.done = true; renderCheck(); } }, 'Summary') : null));
+  if (!st.items.length) { v.append(h('p', { class: 'muted' }, 'Nothing to check: no OSM objects or marked points are visible in photos from other passes yet. Drive the road again, ideally in the other direction.')); return; }
+  if (st.done) return renderCheckSummary(v);
+  const it = st.items[st.i]; const obj = it.obj; const view = it.views[st.vi % it.views.length];
+  const C = obsCam(view.o); const rr = Math.max(18, C.w / 28), sw = Math.max(3, C.w / 250);
+  const extra = (view.top ? `<line x1="${view.p[0]}" y1="${view.p[1]}" x2="${view.top[0]}" y2="${view.top[1]}" stroke="#ff3df0" stroke-width="${sw}" stroke-dasharray="${sw * 2} ${sw * 2}"/>` : '') +
+    `<circle cx="${view.p[0]}" cy="${view.p[1]}" r="${rr * 1.6}" fill="none" stroke="#ff3df0" stroke-width="${sw}"/>`;
+  const vd = verdicts(obj.key);
+  v.append(h('div', { class: 'panes' }, photoPane(view.o, { highlight: new Set([st.id]), extra, osm: true }),
+    h('div', { class: 'stack' },
+      h('div', { class: 'card stack' },
+        h('div', {}, h('b', { style: 'font-size:18px' }, obj.label), ' ', obj.mark ? h('span', { class: 'pill ' + obj.mark.status }, obj.mark.status) : h('span', { class: 'muted small' }, 'OSM node ' + obj.osmId)),
+        obj.tags ? h('div', { class: 'tagchips' }, Object.entries(obj.tags).slice(0, 8).map(([k, val]) => h('span', {}, k + '=' + val))) : h('div', { class: 'muted small' }, 'Marked on ' + fmtDate(obj.origin.created)),
+        h('div', { class: 'muted small' }, `Should be inside the pink ring, about ${fmtM(view.p[2])} ahead. Photo ${fmtDate(view.o.created)}${view.o.trip ? '' : ' (on foot)'} · view ${st.vi % it.views.length + 1} of ${it.views.length}.`),
+        vd.n ? h('div', { class: 'row', style: 'gap:4px' }, vd.seen ? h('span', { class: 'pill approved' }, 'seen ×' + vd.seen) : null, vd.gone ? h('span', { class: 'pill conflict' }, 'not there ×' + vd.gone) : null, vd.unsure ? h('span', { class: 'pill' }, 'unsure ×' + vd.unsure) : null) : null),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', onclick: () => verdict('seen') }, 'Seen it'),
+        h('button', { class: 'btn danger', onclick: () => verdict('gone') }, 'Not there'),
+        h('button', { class: 'btn', onclick: () => verdict('unsure') }, "Can't tell"),
+        it.views.length > 1 ? h('button', { class: 'btn', onclick: () => { st.vi++; renderCheck(); } }, 'Other photo') : null),
+      h('div', { class: 'row' }, h('button', { class: 'btn small', disabled: st.i === 0, onclick: () => { st.i--; st.vi = 0; renderCheck(); } }, '‹ Previous object'), h('button', { class: 'btn small', onclick: () => step() }, 'Skip ›')),
+      h('div', { class: 'keys' }, h('kbd', {}, 'S'), ' seen  ', h('kbd', {}, 'N'), ' not there  ', h('kbd', {}, 'C'), " can't tell  ", h('kbd', {}, 'O'), ' other photo  ', h('kbd', {}, '←'), h('kbd', {}, '→'), ' move'))));
+}
+function step() { const st = checkState; st.vi = 0; if (st.i < st.items.length - 1) st.i++; else st.done = true; renderCheck(); }
+function verdict(v) {
+  const st = checkState, it = st.items[st.i]; recordVerdict(it.obj, it.views[st.vi % it.views.length], v);
+  if (v === 'unsure' && it.views.length > 1 && st.vi < it.views.length - 1) { st.vi++; return renderCheck(); }
+  step();
+}
+function renderCheckSummary(v) {
+  const st = checkState; const rows = st.items.map(x => ({ ...x, vd: verdicts(x.obj.key) }));
+  const marks = rows.filter(x => x.obj.mark); const osm = rows.filter(x => !x.obj.mark);
+  const confirmed = marks.filter(x => x.vd.seen && !x.vd.gone);
+  const gone = osm.filter(x => x.vd.gone >= 2 && !x.vd.seen);
+  const box = h('div', { class: 'stack' });
+  box.append(h('div', { class: 'card' }, h('b', {}, 'Your new points'), h('p', { class: 'muted small', style: 'margin:4px 0' }, `${confirmed.length} of ${marks.length} seen again on another pass.`),
+    confirmed.some(x => x.obj.mark.status === 'pending') ? h('button', { class: 'btn small primary', onclick: () => { confirmed.forEach(x => { if (x.obj.mark.status === 'pending') { x.obj.mark.status = 'approved'; saveObs(x.obj.origin); } }); toast('Approved the confirmed points.'); renderCheck(); } }, 'Approve points seen again') : null,
+    marks.filter(x => x.vd.gone).map(x => h('div', { class: 'warn', style: 'margin-top:6px' }, `${x.obj.label} was not there on ${x.vd.gone} pass(es). `, h('button', { class: 'btn small', onclick: () => openDetail(x.obj.origin.id) }, 'Open its photo')))));
+  box.append(h('div', { class: 'card' }, h('b', {}, 'Objects already in OSM'), h('p', { class: 'muted small', style: 'margin:4px 0' }, `${osm.filter(x => x.vd.seen).length} of ${osm.length} confirmed. ${osm.filter(x => !x.vd.n).length} not checked yet.`),
+    gone.length ? h('p', { class: 'small', style: 'margin:4px 0' }, 'Not visible on two or more separate passes. Deleting from OSM needs care, so this adds a note for other mappers instead:') : null,
+    gone.map(x => h('div', { class: 'row', style: 'margin-top:4px' }, h('span', { style: 'flex:1' }, `${x.obj.label} (node ${x.obj.osmId})`), h('button', { class: 'btn small', onclick: e => { goneNote(x.obj); e.target.disabled = true; } }, 'Add note')))));
+  box.append(h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { st.done = false; st.i = 0; st.vi = 0; renderCheck(); } }, 'Start again'), h('button', { class: 'btn', onclick: () => openRoad(st.id) }, 'Back to road')));
+  v.append(box);
+}
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,textarea,select,dialog[open]')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (view === 'check' && checkState && !checkState.done) {
+    if (k === 's') verdict('seen'); else if (k === 'n') verdict('gone'); else if (k === 'c') verdict('unsure'); else if (k === 'o') { checkState.vi++; renderCheck(); }
+    else if (k === 'arrowright') step(); else if (k === 'arrowleft' && checkState.i > 0) { checkState.i--; checkState.vi = 0; renderCheck(); } else return;
+    e.preventDefault();
+  } else if (view === 'road' && roadState && (k === 'arrowright' || k === 'arrowleft')) { roadState.idx = Math.max(0, roadState.idx + (k === 'arrowright' ? 1 : -1)); renderRoad(); e.preventDefault(); }
+  else if (view === 'detail' && current && current.trip && (k === 'arrowright' || k === 'arrowleft')) {
+    const trip = [...OBS.values()].filter(x => x.trip === current.trip).sort((a, b) => a.created.localeCompare(b.created)); const i = trip.indexOf(current) + (k === 'arrowright' ? 1 : -1);
+    if (trip[i]) { openDetail(trip[i].id); e.preventDefault(); }
+  }
+});
+
+/* ================= drive guidance ================= */
+let guideAt = 0, MINI = null, miniLayer = null, miniOn = false;
+function driveGuide(pose) {
+  const now = Date.now(); if (now - guideAt < 2000) return; guideAt = now;
+  const el = $('#guide'); const p = posNow(); if (!p) { el.hidden = true; return; }
+  const plan = passPlan(); const target = Math.max(1, Number(S.targetPasses) || 2);
+  const live = { id: 'live', kind: 'drive', cam: { lat: p.lat, lon: p.lon, heading0: pose.H || 0, adj: 0, course: sensors.course, speed: sensors.speed } };
+  const ri = roadInfo(live, true); const ctx = ctxFor(p.lat, p.lon);
+  const nowLine = []; let skip = null;
+  if (ri && ctx) {
+    const e = plan.find(x => x.id === ri.id); const name = shortName(ctx.ways[ri.id]);
+    if (e && e.need.includes(ri.dir)) { const c = (e.bins[ri.dir].get(Math.floor(ri.s / BIN)) || new Set()); const n = c.size + (c.has(drive.trip) ? 0 : 1);
+      nowLine.push(h('div', {}, 'On ', h('b', {}, name), ` ${e.dirName[ri.dir]} · pass ${Math.min(n, target)} of ${target}`)); skip = ri; }
+    else nowLine.push(h('div', {}, 'On ', h('b', {}, name), e ? ' (this direction not needed)' : ' · first pass'));
+  }
+  const plan2 = skip ? plan.map(e => e.id === skip.id ? { ...e, status: { ...e.status, [skip.dir]: { ...e.status[skip.dir], unmet: [] } } } : e) : plan;
+  const nx = nextPass(plan2, p);
+  el.innerHTML = '';
+  const heading = sensors.course != null && sensors.speed > 2 ? sensors.course : pose.H;
+  if (nx) {
+    const brg = headingOf([...mkProj(p.lat, p.lon).fwd(nx.pt.lat, nx.pt.lon), 0]); const rel = heading != null ? angDiff(brg, heading) : brg;
+    el.append(h('div', { html: `<svg class="arrow" viewBox="-17 -17 34 34" style="transform:rotate(${rel}deg)"><path d="M0 -15 L10 8 L0 3 L-10 8 Z" fill="#ffb51f" stroke="#fff" stroke-width="1.5"/></svg>` }),
+      h('div', {}, ...nowLine, h('div', {}, 'Next: ', h('b', {}, shortName(nx.e.way)), ` ${nx.e.dirName[nx.d]} · ${nx.dist < 1000 ? Math.round(nx.dist / 10) * 10 + ' m' : (nx.dist / 1000).toFixed(1) + ' km'}`)));
+  } else el.append(h('div', {}, ...nowLine, h('div', {}, plan.length ? `Every planned stretch has ${target} passes in each direction.` : 'First pass: drive the roads you want to survey.')));
+  el.hidden = false;
+  if (miniOn) drawMini(plan, p, nx);
+}
+function drawMini(plan, p, nx) {
+  if (!MINI) {
+    MINI = L.map('mini', { zoomControl: false, attributionControl: true }).setView([p.lat, p.lon], 16);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OSM' }).addTo(MINI); miniLayer = L.layerGroup().addTo(MINI);
+  }
+  miniLayer.clearLayers();
+  for (const e of plan) L.polyline(e.geom.map(g => [g.lat, g.lon]), { color: e.done ? '#1d8656' : e.need.some(d => e.status[d].min === 0) ? '#b3261e' : '#f2a100', weight: 6, opacity: .85 }).addTo(miniLayer);
+  if (nx) L.circleMarker([nx.pt.lat, nx.pt.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#ffb51f', fillOpacity: 1 }).addTo(miniLayer);
+  L.circleMarker([p.lat, p.lon], { radius: 7, color: '#fff', weight: 3, fillColor: '#1f5fae', fillOpacity: 1 }).addTo(miniLayer);
+  MINI.setView([p.lat, p.lon], MINI.getZoom(), { animate: false });
+}
+function toggleMini() {
+  miniOn = !miniOn; $('#mini').hidden = !miniOn; $('#btnPlan').classList.toggle('on', miniOn);
+  if (!miniOn && MINI) { MINI.remove(); MINI = null; } else { guideAt = 0; }
+}
+
+/* ================= move between devices ================= */
+async function importSurvey(file) {
+  if (typeof JSZip === 'undefined') throw new Error('Open the app once while online so it can load the zip reader.');
+  toast('Reading ' + file.name + '…', 60000);
+  const zip = await JSZip.loadAsync(file); const sj = zip.file('survey.json'); if (!sj) throw new Error('This zip has no survey.json, so it is not a LocalityMap export.');
+  const js = JSON.parse(await sj.async('string')); let added = 0, merged = 0, skipped = 0;
+  for (const ph of js.photos || []) {
+    const rec = ph.record; if (!rec) { skipped++; continue; }
+    const ex = OBS.get(rec.id);
+    if (ex) { mergeObs(ex, rec); for (const a of ex.anns) annSigs.set(a.id, annSig(a)); await store.put('obs', ex); merged++; continue; }
+    const f = zip.file(ph.file); if (!f) { skipped++; continue; }
+    const o = migrate({ ...rec, photo: new Blob([await f.async('uint8array')], { type: 'image/jpeg' }) });
+    o.anns.forEach(a => annSigs.set(a.id, annSig(a))); OBS.set(o.id, o); await store.put('obs', o); loadFor(o).catch(() => {}); added++;
+  }
+  for (const [k, list] of Object.entries(js.checks || {})) { const mine = CHECKS[k] || []; const by = new Map(mine.map(x => [x.o, x])); for (const x of list) { const m = by.get(x.o); if (!m || x.at > m.at) by.set(x.o, x); } CHECKS[k] = [...by.values()]; }
+  saveChecks(); saveLS('lm.trips', Object.assign(loadLS('lm.trips', {}), js.trips || {}));
+  roadCache.clear(); toast(`Imported: ${added} new photos, ${merged} updated${skipped ? `, ${skipped} skipped (photos not in this export and not on this device)` : ''}.`, 7000);
+  go('surveys');
+}
+function mergeObs(ex, rec) {
+  if ((rec.updated || 0) > (ex.updated || 0)) { ex.cam = rec.cam; ex.hfovLong = rec.hfovLong; }
+  const byId = new Map(ex.anns.map(a => [a.id, a]));
+  for (const a of rec.anns || []) { const e = byId.get(a.id); if (!e) ex.anns.push(a); else if ((a.updated || 0) > (e.updated || 0)) Object.assign(e, a); }
+  ex.updated = Math.max(ex.updated || 0, rec.updated || 0);
 }
 
 /* ================= mark sheet ================= */
@@ -1509,24 +1823,24 @@ async function shareFile(file) {
 }
 
 /* ================= export the raw survey (future-proofing) ================= */
-async function exportData(list) {
+async function exportData(list, withPhotos = true) {
   if (typeof JSZip === 'undefined') return toast('Export needs to load once while online.');
-  toast(`Packing ${list.length} photos…`, 60000);
+  toast(withPhotos ? `Packing ${list.length} photos…` : 'Packing your review decisions…', 60000);
   const zip = new JSZip(); const meta = [], feats = [];
   for (const o of list) {
-    zip.file(`photos/${o.id}.jpg`, await geotaggedJpeg(o));
+    if (withPhotos) zip.file(`photos/${o.id}.jpg`, await geotaggedJpeg(o));
     const C = obsCam(o);
-    meta.push({ id: o.id, file: `photos/${o.id}.jpg`, created: o.created, kind: o.kind, trip: o.trip, image: o.img, hfov_long_deg: o.hfovLong,
+    meta.push({ record: Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'photo')), id: o.id, file: `photos/${o.id}.jpg`, created: o.created, kind: o.kind, trip: o.trip, image: o.img, hfov_long_deg: o.hfovLong,
       camera: { lat: o.cam.lat, lon: o.cam.lon, gps_accuracy_m: o.cam.acc, speed_ms: o.cam.speed, gps_course_deg: o.cam.course, heading_deg: Hd(o), heading_source: o.cam.headingSrc, heading_correction_deg: o.cam.adj || 0, height_m: o.cam.height,
         basis_enu: { forward: C.f, right: C.r, up: C.u } },
       marks: o.anns.map(a => ({ preset: a.preset, x: a.x, y: a.y, status: a.status, way: a.wayId, lat: a.lat, lon: a.lon, distance_m: a.dist, bearing_deg: a.bearing, values: a.values, text: a.text, result: a.result })) });
     feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [o.cam.lon, o.cam.lat] }, properties: { id: o.id, created: o.created, heading: Math.round(Hd(o) * 10) / 10, marks: o.anns.length } });
   }
-  zip.file('survey.json', JSON.stringify({ app: APP, exported: new Date().toISOString(), frame: 'ENU metres at each camera; basis vectors are unit vectors (east, north, up)', photos: meta }, null, 1));
+  zip.file('survey.json', JSON.stringify({ app: APP, exported: new Date().toISOString(), frame: 'ENU metres at each camera; basis vectors are unit vectors (east, north, up)', photos: meta, checks: CHECKS, trips: loadLS('lm.trips', {}), with_photos: withPhotos }));
   zip.file('cameras.geojson', JSON.stringify({ type: 'FeatureCollection', features: feats }));
   const blob = await zip.generateAsync({ type: 'blob' });
   $('#toast').hidden = true;
-  shareFile(new File([blob], `localitymap-survey-${stamp()}.zip`, { type: 'application/zip' }));
+  shareFile(new File([blob], `localitymap-${withPhotos ? 'survey' : 'reviews'}-${stamp()}.zip`, { type: 'application/zip' }));
 }
 
 /* ================= settings ================= */
@@ -1554,13 +1868,18 @@ function renderSettings() {
   v.append(num('minSpeed', 'Stop shooting below (km/h)', 1, 'avoids piles at lights'));
   v.append(num('mountOffset', 'Mount offset from straight ahead (°)', 0.5, 'set by "Apply to drive"'));
   v.append(num('carCamHeight', 'Mounted camera height (m)', 0.1));
+  v.append(num('targetPasses', 'Passes wanted per direction', 1, 'first pass + confirmations'));
   const lv = h('input', { type: 'checkbox', id: 'set-live', checked: S.liveOverlay }); lv.onchange = () => { S.liveOverlay = lv.checked; liveOn = lv.checked; saveSettings(); };
   v.append(h('label', { class: 'toggle', for: 'set-live' }, lv, 'Draw OSM roads over the live camera'));
-  v.append(h('h3', {}, 'Data on this phone'));
+  v.append(h('h3', {}, 'Review on another device'));
+  v.append(h('p', { class: 'muted small', style: 'margin:0 0 8px' }, 'Export from the phone, then open LocalityMap on an iPad or computer and import the zip (AirDrop, Files, email or a USB cable all work). Review and upload there, or export the reviews back: a reviews-only export is small and merges into the phone\'s copy, newest change winning.'));
+  const imp = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ''; if (f) importSurvey(f).catch(err => toast('Import failed: ' + err.message, 7000)); } });
+  v.append(h('div', { class: 'row', style: 'margin-bottom:8px' }, h('button', { class: 'btn small', onclick: () => exportData([...OBS.values()], true) }, 'Export with photos'),
+    h('button', { class: 'btn small', onclick: () => exportData([...OBS.values()], false) }, 'Export reviews only'), h('label', { class: 'btn small' }, 'Import a zip', imp)));
+  v.append(h('h3', {}, 'Data on this device'));
   const done = [...OBS.values()].filter(o => o.anns.length ? o.anns.every(a => ['uploaded', 'rejected', 'merged'].includes(a.status)) : false);
   const info = h('span', { class: 'muted', style: 'flex:1' }, `${OBS.size} photos stored, ${done.length} fully done.`);
   v.append(h('div', { class: 'row' }, info,
-    h('button', { class: 'btn small', onclick: () => exportData([...OBS.values()]) }, 'Export everything'),
     done.length ? twoTap(h('button', { class: 'btn small danger' }, 'Remove finished'), 'Remove finished', async () => { await deleteObs(done); renderSettings(); toast('Removed finished photos.'); }) : null));
   if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { info.textContent += ` Using ${Math.round(e.usage / 1e6)} MB of about ${Math.round(e.quota / 1e6)} MB.`; }).catch(() => {});
   v.append(h('p', { class: 'muted', style: 'font-size:12px;margin-top:24px' }, APP + ' · map data © OpenStreetMap contributors, ODbL'));
@@ -1572,13 +1891,14 @@ $('#btnStartHand').addEventListener('click', () => startSensors('hand'));
 $('#btnStartDrive').addEventListener('click', () => startSensors('drive'));
 $('#btnShoot').addEventListener('click', () => capture(captureMode === 'drive').then(o => { if (o && captureMode === 'drive') { drive.count++; toast('Photo added to the drive.'); } }));
 $('#btnStop').addEventListener('click', stopAll);
+$('#btnPlan').addEventListener('click', toggleMini);
 $('#btnPause').addEventListener('click', () => { drive.paused = !drive.paused; $('#btnPause').textContent = drive.paused ? 'Resume' : 'Pause'; });
 $('#btnOverlay').addEventListener('click', () => { liveOn = !liveOn; $('#btnOverlay').classList.toggle('on', liveOn); });
 $('#btnOverlay').classList.toggle('on', liveOn);
 $('#importFile').addEventListener('change', e => { importFiles([...e.target.files]).catch(err => toast(err.message)); e.target.value = ''; });
 (async () => {
   updateBadge();
-  try { for (const o of await store.all('obs')) OBS.set(o.id, migrate(o)); } catch (e) { toast('Storage unavailable: ' + e.message); }
+  try { for (const o of await store.all('obs')) { OBS.set(o.id, migrate(o)); o.anns.forEach(a => annSigs.set(a.id, annSig(a))); } } catch (e) { toast('Storage unavailable: ' + e.message); }
   const returned = await handleOAuthReturn();
   go(returned ? 'upload' : (OBS.size ? 'surveys' : 'capture'));
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});

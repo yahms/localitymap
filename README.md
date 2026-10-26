@@ -42,6 +42,16 @@ iPhone home-screen apps can't receive the sign-in redirect, so set *Sign-in meth
 - The screen is kept awake. iOS and Android stop web apps when the screen locks or you switch apps, so keep LocalityMap in front.
 - Photos are about 300 KB each; the HUD shows storage used.
 
+### Repeat passes
+One pass is a guess; a second pass, ideally in the other direction, is a check. LocalityMap tracks every road you drive in 40 m stretches, per direction of travel, and counts how many separate drives covered each stretch (a photo covers the ~30 m the camera sees ahead). The goal is **2 passes in every direction traffic can use** (one-way streets, roundabouts and motorways only need their own direction); change it under Settings → *Passes wanted per direction*.
+
+While driving, the panel under the heading shows:
+- **On**: the road you're on, which way, and which pass this is.
+- **Next**: the nearest stretch still needing a pass, which direction to drive it, and an arrow pointing to it.
+- **Plan**: a small map with every road you've surveyed: red has a direction with no passes, amber is partly done, green is done.
+
+Turn-by-turn navigation isn't built in. Switching to a maps app would stop the camera, because phones pause web apps in the background. Use the arrow and plan map, or a second device (car screen or another phone) for navigation.
+
 ### Import
 Photos from the gallery work too. iPhone photos usually carry position and camera direction in their EXIF data; others can be positioned on the map by hand.
 
@@ -49,11 +59,37 @@ Photos from the gallery work too. iPhone photos usually carry position and camer
 
 ## 3. Reviewing
 
-The **Review** tab has three views.
+The **Review** tab has four views.
 
 - **Photos**: drives (with every photo) and single photos. Open one to mark it.
 - **By road**: every OSM road that appears in your photos (the road a drive photo was on, or the road a hand photo looks along), with the photos in order. Open a road to get the **road sheet**: flip through all its photos with that road highlighted, fill in one set of road details for the whole way, and approve everything on it at once. If marks on different photos disagree (say `lanes=2` on one and `3` on another), the road sheet flags the conflict and their individual road marks are merged into the one change when you save.
 - **By area**: about 450 m squares named after their main streets, listing every change in the area for bulk approval.
+- **Passes**: a map and list of every road driven, showing how many passes each direction has.
+
+### Checking against other passes (expected vs seen)
+From a road sheet or the Passes view, *Check against passes* walks through everything that should be visible along that road:
+- objects already in OSM within 25 m of it: signals, signs, crossings, street lights, poles, hydrants, bus stops, cabinets, trees
+- new points you marked
+
+For each one it picks the best photo from a *different* drive (the photo a point was marked on doesn't count as confirmation), rings the spot where it should appear, and you answer **Seen it**, **Not there** or **Can't tell**. On a computer use the keys `S`, `N`, `C`, `O` (other photo) and the arrow keys.
+
+The summary then:
+- lets you approve your new points that were seen again on another drive
+- flags your points that weren't there on a later drive, so you can check them before approving
+- lists OSM objects not visible on two or more separate drives and never seen. Deleting map data needs care, so it offers to add an OSM note for other mappers rather than deleting.
+
+The photo overlay now also shows OSM point objects (light blue rings with a short pole), so missing or misplaced ones stand out while marking.
+
+Spotting objects is done by you, not automatically. Automatic detection is planned for the native app (see section 5).
+
+### Reviewing on an iPad or computer
+Survey data lives on the device that captured it. To review elsewhere:
+1. On the phone: Settings → *Export with photos* (or *Export* on a drive card or area) and send the zip by AirDrop, Files, email or cable.
+2. On the iPad or computer: open https://yahms.github.io/localitymap/ → Review → *Import from another device*.
+3. Review there, using the bigger screen and keyboard shortcuts. You can sign in and upload to OSM from that device directly.
+4. To bring decisions back to the phone, use *Export reviews only* on the reviewing device and import it on the phone. It's small (no photos) and merges mark by mark, with the most recent change winning.
+
+There's no automatic sync. That would need a server or a cloud drive connection, which this app deliberately doesn't have.
 
 ### Marking a photo
 Tap the photo where the thing is and choose what it is (list below). The app traces your tap as a line of sight from the camera, finds the OSM road or building it hits, and for new points estimates the distance from the camera tilt (assumes flat ground and that you tapped the base of the object).
@@ -175,7 +211,8 @@ The web app is fine for the survey-review-upload loop. These are the limits you'
 | No control over shutter speed, focus or lens; no lens calibration | Motion blur at speed, estimated field of view | AVFoundation: fast shutter, fixed focus, per-frame camera intrinsics, ultra-wide lens |
 | GPS about 1 Hz, no sensor fusion with motion | Positions between fixes are extrapolated | ARKit visual-inertial tracking gives centimetre-level relative motion between photos |
 | No AR on iPhone browsers (WebXR AR is Android Chrome only) | The live overlay is a projection of flat ground, not true AR | ARKit: plane detection, depth (LiDAR on Pro models), anchored 3D overlays |
-| On-device detection of signs, poles and lanes is slow in the browser | Everything is marked by hand | Core ML runs detection on every frame in real time |
+| Only one app runs in front, and web apps pause in the background | No turn-by-turn navigation alongside capture | CarPlay or in-app navigation in the native capture app |
+| On-device detection of signs, poles and lanes is slow in the browser | Everything is marked and checked by hand | Core ML runs detection on every frame in real time |
 | Browser storage can be cleared by iOS for sites not installed to the home screen | Lost surveys if not installed | Files on device, iCloud backup |
 
 **Do we need Xcode yet?** Not for what's here. You'll need a native iPhone app when you want any of: true AR overlays and a 3D model built from the drive, automatic detection while driving, or reliable capture with the screen off. That means a Mac with Xcode and an Apple Developer account (free for installing on your own phone for 7 days at a time; USD 99/year for TestFlight and longer installs).
@@ -184,8 +221,9 @@ A practical route is to keep this web app as the review and upload desk, and lat
 
 ### Roadmap toward 3D / AR
 1. Now: geotagged photos with full camera orientation, OSM overlay on photos and on the live camera.
-2. Next (web): reconstruct points seen in two or more drive photos by triangulating lines of sight; build simple extruded buildings from OSM footprints plus your heights and roofs, shown in the overlay.
-3. Native: ARKit session during drives for precise camera paths, LiDAR depth where available, live 3D model of the street placed over the camera view.
+2. Now: repeat passes in both directions with expected-vs-seen checks, which give confirmed observations from independent viewpoints.
+3. Next (web): reconstruct points seen in two or more drive photos by triangulating lines of sight; build simple extruded buildings from OSM footprints plus your heights and roofs, shown in the overlay.
+4. Native: automatic detection fills in the expected-vs-seen answers, and ARKit session during drives for precise camera paths, LiDAR depth where available, live 3D model of the street placed over the camera view.
 
 ---
 

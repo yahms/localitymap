@@ -194,6 +194,7 @@ input[type=range]{width:100%}
 .lf-num.rejected,.lf-num.merged{background:#888;color:#fff}
 .lf-num.uploaded{background:var(--info);color:#fff}
 .lf-dot{background:var(--info);border:2px solid #fff;border-radius:50%}
+.lf-feat{background:none;border:0}
 .lf-dot.cur{background:var(--mark)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -246,7 +247,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.5.0';
+const VERSION = '0.5.1';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -629,8 +630,11 @@ function analyseScene(L, rgb, W, H, C0) {
   const wires = rgb ? findWires(L, rgb, W, H) : null;
   const counts = {}; for (let i = 0; i < L.length; i++) if (L[i] !== 255) counts[VISTAS[L[i]]] = (counts[VISTAS[L[i]]] || 0) + 1;
   const share = Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, Math.round(v / L.length * 1000) / 1000]));
+  const sample = (side) => { const rs = rows.filter(r => usable(side === 'L' ? r.l : r.r) && (side === 'L' ? r.xl > 2 : r.xr < W - 3)); const st = Math.max(1, Math.floor(rs.length / 24));
+    return rs.filter((_, i) => i % st === 0).map(r => [Math.round((side === 'L' ? r.xl : r.xr + 1) / W * 1e4) / 1e4, Math.round((r.y + 1) / H * 1e4) / 1e4, (side === 'L' ? r.l : r.r).kerb ? 1 : 0]); };
+  const edgePx = { L: sample('L'), R: sample('R') };
   if (road) delete road.Ct;
-  return { road, markings: marks, objects, cars, wires, share };
+  return { road, markings: marks, objects, cars, wires, share, edgePx };
 }
 
 /* ================= vision runtime ================= */
@@ -641,13 +645,13 @@ const PAL = { 'Road': [128, 64, 128], 'Lane Marking - General': [255, 255, 255],
   'Fence': [190, 153, 153], 'Guard Rail': [180, 165, 180], 'Barrier': [90, 120, 150], 'Sky': [70, 130, 180], 'Pole': [153, 153, 153], 'Utility Pole': [0, 255, 255], 'Street Light': [255, 0, 255], 'Traffic Light': [250, 170, 30],
   'Traffic Sign (Front)': [220, 220, 0], 'Car': [0, 0, 142], 'Truck': [0, 0, 70], 'Bus': [0, 60, 100], 'Person': [220, 20, 60], 'Catch Basin': [255, 0, 0], 'Manhole': [0, 255, 0], 'Fire Hydrant': [255, 80, 80], 'Ego Vehicle': [40, 40, 40] };
 const SEG_COLORS = VISTAS.map(n => PAL[n] || [120, 120, 120]);
-let TJS = null, VM = null, vmLoading = null;
+let TJS = null, VM = null, vmLoading = null, forceCPU = false;
 function visionModel(status) {
   if (VM) return Promise.resolve(VM);
   if (!vmLoading) vmLoading = (async () => {
     const lite = S.visionQuality === 'lite'; status && status(`Loading the street-scene model (${lite ? 83 : 165} MB, first time only)…`);
     TJS = await import(TJS_URL);
-    let device = navigator.gpu ? 'webgpu' : 'wasm'; const dtype = lite ? (device === 'webgpu' ? 'fp16' : 'q8') : 'fp32';
+    let device = navigator.gpu && !forceCPU ? 'webgpu' : 'wasm'; const dtype = lite ? (device === 'webgpu' ? 'fp16' : 'q8') : 'fp32';
     const proc = await TJS.AutoProcessor.from_pretrained(VIS_MODEL); let model;
     try { model = await TJS.AutoModel.from_pretrained(VIS_MODEL, { device, dtype }); }
     catch (e) { if (device !== 'webgpu') throw e; device = 'wasm'; model = await TJS.AutoModel.from_pretrained(VIS_MODEL, { device, dtype: lite ? 'q8' : 'fp32' }); }
@@ -657,21 +661,27 @@ function visionModel(status) {
   return vmLoading;
 }
 // Per-pixel classes at up to 1024 px wide: mask logits are interpolated to full size, and in Best quality the mirrored photo is run too and averaged.
-async function segmentPhoto(o) {
+async function segmentPhoto(o, opt = {}) {
   const m = await visionModel(); const bmp = await createImageBitmap(o.photo);
-  const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height)), cw = Math.round(bmp.width * k), ch = Math.round(bmp.height * k);
-  const c = document.createElement('canvas'); c.width = cw; c.height = ch; c.getContext('2d').drawImage(bmp, 0, 0, cw, ch);
+  const passes = opt.passes || (S.visionQuality === 'lite' ? 1 : 2);
+  // the size MaskFormer was trained at: shortest side 800, longest at most 1333 (smaller when retrying on a struggling device)
+  const maxL = opt.maxLong || 1333, k = Math.min(1, 800 / Math.min(bmp.width, bmp.height), maxL / Math.max(bmp.width, bmp.height));
+  const cw = Math.round(bmp.width * k), ch = Math.round(bmp.height * k);
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch; c.getContext('2d').drawImage(bmp, 0, 0, cw, ch); bmp.close && bmp.close();
   const runs = [];
-  for (const flip of S.visionQuality === 'lite' ? [false] : [false, true]) {
+  for (const flip of passes > 1 ? [false, true] : [false]) {
     let src = c; if (flip) { src = document.createElement('canvas'); src.width = cw; src.height = ch; const g = src.getContext('2d'); g.translate(cw, 0); g.scale(-1, 1); g.drawImage(c, 0, 0); }
     const inp = await m.proc(await TJS.RawImage.fromCanvas(src)); const out = await m.model(inp);
     const [, Q, K1] = out.class_queries_logits.dims, [, , mh, mw] = out.masks_queries_logits.dims, [, , ph, pw] = inp.pixel_values.dims;
-    let rh = ph, rw = pw; const pm = inp.pixel_mask; if (pm) { const [, H2, W2] = pm.dims; let yy = 0, xx = 0; for (let y = 0; y < H2; y++) if (pm.data[y * W2]) yy = y; for (let x = 0; x < W2; x++) if (pm.data[x]) xx = x; rh = yy + 1; rw = xx + 1; }
-    else { const s = Math.min(pw / cw, ph / ch); rw = Math.round(cw * s); rh = Math.round(ch * s); }
+    // the part of the padded input that holds the photo, as the processor reports it
+    let rh = ph, rw = pw; const rs = inp.reshaped_input_sizes && inp.reshaped_input_sizes[0];
+    if (rs && rs.length === 2) { rh = Number(rs[0]); rw = Number(rs[1]); }
+    else if (inp.pixel_mask) { const pm = inp.pixel_mask, [, H2, W2] = pm.dims; let yy = 0, xx = 0; for (let y = 0; y < H2; y++) if (pm.data[y * W2]) yy = y; for (let x = 0; x < W2; x++) if (pm.data[x]) xx = x; rh = yy + 1; rw = xx + 1; }
     const cl = out.class_queries_logits.data, qs = [];
     for (let q = 0; q < Q; q++) { let mx = -1e9; for (let j = 0; j < K1; j++) mx = Math.max(mx, cl[q * K1 + j]); let sum = 0; const e = new Float32Array(K1); for (let j = 0; j < K1; j++) { e[j] = Math.exp(cl[q * K1 + j] - mx); sum += e[j]; }
       const top = []; for (let j = 0; j < K1 - 1; j++) { const pr = e[j] / sum; if (pr > 0.03) top.push(j, pr); } if (top.length) qs.push({ off: q * mh * mw, top }); }
-    runs.push({ flip, qs, ml: out.masks_queries_logits.data, mh, mw, vh: rh / ph * mh, vw: rw / pw * mw, K: K1 - 1 });
+    runs.push({ flip, qs, ml: Float32Array.from(out.masks_queries_logits.data), mh, mw, vh: rh / ph * mh, vw: rw / pw * mw, K: K1 - 1 });
+    for (const t of [out.class_queries_logits, out.masks_queries_logits, inp.pixel_values, inp.pixel_mask]) try { t && t.dispose && t.dispose(); } catch {}
   }
   const W = Math.min(1024, cw), H = Math.round(ch * W / cw); const L = new Uint8Array(W * H).fill(255); const K = runs[0].K; const acc = new Float32Array(K);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -688,7 +698,7 @@ async function segmentPhoto(o) {
     let bi = 0; for (let j = 1; j < K; j++) if (acc[j] > acc[bi]) bi = j; if (acc[bi] > 0.05) L[y * W + x] = m.map[bi];
   }
   const g = document.createElement('canvas'); g.width = W; g.height = H; const gc = g.getContext('2d', { willReadFrequently: true }); gc.drawImage(c, 0, 0, W, H);
-  return { L, rgb: gc.getImageData(0, 0, W, H).data, W, H };
+  return { L, rgb: gc.getImageData(0, 0, W, H).data, W, H, passes };
 }
 const rle = L => { const out = []; let v = L[0], n = 0; for (let i = 0; i < L.length; i++) { if (L[i] === v) n++; else { out.push(v, n); v = L[i]; n = 1; } } out.push(v, n); return out; };
 function segImageURL(vis) {
@@ -696,12 +706,12 @@ function segImageURL(vis) {
   for (let k = 0; k < vis.rle.length; k += 2) { const col = SEG_COLORS[vis.rle[k]]; for (let n = 0; n < vis.rle[k + 1]; n++, i++) if (col) { im.data.set(col, i * 4); im.data[i * 4 + 3] = 255; } }
   g.putImageData(im, 0, 0); return c.toDataURL('image/png');
 }
-async function analysePhoto(o) {
-  const seg = await segmentPhoto(o);
+async function analysePhoto(o, opt) {
+  const seg = await segmentPhoto(o, opt);
   const pose0 = { adj: o.cam.adj || 0, tilt: o.cam.tilt || 0, lat: o.cam.lat, lon: o.cam.lon, shift: o.cam.shift || 0 };
   const C0 = { ...obsCam(o), w: seg.W, h: seg.H };
   const res = analyseScene(seg.L, seg.rgb, seg.W, seg.H, C0);
-  o.vision = { at: new Date().toISOString(), model: VIS_MODEL + ' ' + VM.dtype + (S.visionQuality === 'lite' ? '' : ' x2'), W: seg.W, H: seg.H, rle: rle(seg.L), res, pose0, v: 2 };
+  o.vision = { at: new Date().toISOString(), model: VIS_MODEL + ' ' + VM.dtype + (seg.passes > 1 ? ' x2' : ''), W: seg.W, H: seg.H, rle: rle(seg.L), res, pose0, v: 2 };
   if (S.autoAlign) autoAlign(o);
   o.anns.forEach(a => resolveAnn(o, a)); roadCache.clear(); saveObs(o);
   return o.vision;
@@ -737,15 +747,37 @@ function undoAlign(o) { const p0 = o.vision && o.vision.pose0; if (!p0) return; 
 // One job at a time, with progress for whoever is showing it.
 const vjob = { running: false, cancel: false, done: 0, total: 0, label: '', listeners: new Set() };
 const vNotify = () => vjob.listeners.forEach(f => { try { f(); } catch {} });
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('the device stopped responding (out of memory?)')), ms))]);
 async function runAnalysis(list, label) {
-  if (vjob.running) { toast('Already analysing: ' + vjob.label); return; }
+  if (vjob.running) { toast('Already analysing ' + vjob.label + '. Wait for it, or press Stop.'); return; }
   const todo = list.filter(o => !o.vision || o.vision.v !== 2); if (!todo.length) { toast('Those photos are already analysed.'); return; }
-  Object.assign(vjob, { running: true, cancel: false, done: 0, total: todo.length, label, status: '' }); vNotify();
+  Object.assign(vjob, { running: true, cancel: false, done: 0, ok: 0, failed: 0, lighter: 0, total: todo.length, label, status: '', lastError: '' }); vNotify();
+  let opt = null;   // null = the quality chosen in Settings; set to lighter options once the device has struggled
   try {
-    await visionModel(t => { vjob.status = t; vNotify(); });
-    for (const o of todo) { if (vjob.cancel) break; vjob.status = `${VM.dev} · photo ${vjob.done + 1} of ${vjob.total}`; vNotify(); await loadFor(o).catch(() => {}); try { await analysePhoto(o); } catch (e) { console.warn(e); } vjob.done++; vNotify(); }
-    toast(vjob.cancel ? `Stopped after ${vjob.done} photos.` : `Analysed ${vjob.done} photos.`);
-  } catch (e) { toast(e.message, 7000); }
+    await withTimeout(visionModel(t => { vjob.status = t; vNotify(); }), 300000);
+    for (const o of todo) {
+      if (vjob.cancel) break;
+      vjob.status = `${VM.dev}${opt ? ' · lighter' : ''} · photo ${vjob.done + 1} of ${vjob.total}`; vNotify();
+      await loadFor(o).catch(() => {});
+      let okNow = false;
+      for (let attempt = 0; attempt < 2 && !okNow; attempt++) {
+        try { await withTimeout(analysePhoto(o, opt || undefined), opt ? 120000 : 90000); okNow = true; if (opt) vjob.lighter++; }
+        catch (e) { vjob.lastError = e.message || String(e); console.warn('analysis failed', o.id, e);
+          if (/stopped responding|device|lost|memory/i.test(vjob.lastError) && VM && VM.dev === 'GPU') { forceCPU = true; VM = null; vmLoading = null; vjob.status = 'Graphics chip stopped responding: continuing on the processor (slower)…'; vNotify(); try { await withTimeout(visionModel(), 300000); } catch {} }
+          if (!opt) { opt = { passes: 1, maxLong: 1024 }; vjob.status = 'Running short of memory: switching to lighter analysis…'; vNotify(); }
+          else break; }
+        await sleep(30);
+      }
+      vjob.done++; okNow ? vjob.ok++ : vjob.failed++; vNotify();
+      if (!okNow && vjob.failed >= 3 && vjob.ok === 0) { vjob.cancel = true; break; }
+      await sleep(30);   // let the screen update and memory be freed between photos
+    }
+  } catch (e) { vjob.lastError = e.message || String(e); vjob.failed = vjob.total - vjob.ok; }
+  const msg = [`Analysed ${vjob.ok} of ${vjob.total} photo${vjob.total > 1 ? 's' : ''}`];
+  if (vjob.lighter) msg.push(`${vjob.lighter} at lighter quality because the device ran short of memory`);
+  if (vjob.failed) msg.push(`${vjob.failed} failed (${vjob.lastError}). Try Settings → Vision quality → Lighter, or analyse on a computer`);
+  if (vjob.cancel && vjob.done < vjob.total && !vjob.failed) msg.push('stopped');
+  toast(msg.join('. ') + '.', vjob.failed ? 12000 : 5000);
   vjob.running = false; vNotify();
   if (view === 'road') renderRoad(); else if (view === 'detail') renderDetail(); else if (view === 'surveys') renderSurveys();
 }
@@ -753,8 +785,8 @@ function progressBox() {
   const box = h('div', { class: 'card', style: 'margin:8px 0' });
   const draw = () => { if (!box.isConnected && box.dataset.on) { vjob.listeners.delete(draw); return; } box.dataset.on = '1'; box.innerHTML = '';
     box.hidden = !vjob.running; if (!vjob.running) return;
-    box.append(h('div', { class: 'row' }, h('b', { style: 'flex:1' }, 'Analysing ' + vjob.label), h('button', { class: 'btn small', onclick: () => { vjob.cancel = true; } }, 'Stop')),
-      h('div', { class: 'muted small' }, vjob.status || ''), h('progress', { max: vjob.total || 1, value: vjob.done, style: 'width:100%' })); };
+    box.append(h('div', { class: 'row' }, h('b', { style: 'flex:1' }, 'Analysing ' + vjob.label), h('button', { class: 'btn small', onclick: () => { vjob.cancel = true; vjob.status = 'Stopping after this photo…'; vNotify(); } }, 'Stop')),
+      h('div', { class: 'muted small' }, (vjob.status || '') + (vjob.failed ? ` · ${vjob.failed} failed` : '')), h('progress', { max: vjob.total || 1, value: vjob.done, style: 'width:100%' })); };
   vjob.listeners.add(draw); draw(); return box;
 }
 // Combine what the photos of one road say about it. Left/right are along the OSM way's direction.
@@ -816,6 +848,8 @@ function visionSummary(x) {
     if (ctx) for (const [id, nd] of Object.entries(ctx.nodes)) { const l = poiLabel(nd.tags); if (l && Math.hypot(...pr.fwd(nd.lat, nd.lon)) < 5) { c.osm = { id, label: l }; break; } }
     c.taken = [...OBS.values()].some(o => o.anns.some(a => a.lat != null && a.status !== 'rejected' && Math.hypot(...mkProj(c.lat, c.lon).fwd(a.lat, a.lon)) < 4));
     c.ignored = Object.keys(ignored).some(k => { const [kd, la, lo] = k.split(':'); return kd === c.kind && Math.hypot(...pr.fwd(+la, +lo)) < 4; });
+    const mv = loadLS('lm.clusterPos', []).find(m2 => m2.kind === c.kind && Math.hypot(...pr.fwd(m2.lat0, m2.lon0)) < 5);
+    if (mv) { c.calc = { lat: c.lat, lon: c.lon }; c.lat = mv.lat; c.lon = mv.lon; c.moved = true; }
   }
   const laneBest = Object.entries(lanes).sort((a, b) => b[1] - a[1])[0];
   return { n, mine, width: wmed != null ? { med: Math.round(wmed * 10) / 10, mad: Math.round(mad * 10) / 10, count: widths.length } : null, left: sideOf('left'), right: sideOf('right'), markings: mk,
@@ -1992,6 +2026,12 @@ function drawDetailMap() {
       m.on('dragend', () => { const ll = m.getLatLng(); a.lat = ll.lat; a.lon = ll.lng; a.manual = true; a.dist = Math.hypot(...pr.fwd(a.lat, a.lon)); recompute(); });
     }
   });
+  const vr = o.vision && o.vision.v === 2 && o.vision.res;
+  if (vr) {
+    if (vr.edgePx) for (const [ex, ey, k] of [...vr.edgePx.L, ...vr.edgePx.R]) { const g = groundOf(C, ex, ey); if (!g || Math.hypot(...g) > 40) continue; const ll = pr.inv(g[0], g[1]); L.circleMarker([ll.lat, ll.lon], { radius: 2.5, stroke: false, fillColor: k ? '#ffd23f' : '#c0c8c4', fillOpacity: .95, interactive: false }).addTo(mapLayer); }
+    for (const ob of vr.objects) if (KIND_LABEL[ob.kind] && ob.ground) { const g = groundOf(C, ob.x, ob.y); if (!g || Math.hypot(...g) > 40) continue; const ll = pr.inv(g[0], g[1]);
+      L.circleMarker([ll.lat, ll.lon], { radius: 6, color: '#000', weight: 2, fillColor: KIND_COLOR[ob.kind] || '#fff', fillOpacity: 1 }).bindTooltip(KIND_LABEL[ob.kind] + (ob.height ? ` ~${Math.round(ob.height)} m` : '') + ` · ${fmtM(Math.hypot(...g))} away`).addTo(mapLayer); }
+  }
   const arrow = `<svg width="34" height="34" viewBox="-17 -17 34 34" style="transform:rotate(${Hd(o)}deg)"><circle r="9" fill="#1f5fae" stroke="#fff" stroke-width="3"/><path d="M0 -16 L6 -7 L-6 -7 Z" fill="#1f5fae" stroke="#fff" stroke-width="1.5"/></svg>`;
   const cam = L.marker([o.cam.lat, o.cam.lon], { draggable: true, icon: L.divIcon({ className: 'lf-cam', html: arrow, iconSize: [34, 34] }), zIndexOffset: 1000 }).bindTooltip('Camera position. Drag to correct.').addTo(mapLayer);
   cam.on('dragend', () => { const ll = cam.getLatLng(); o.cam.lat = ll.lat; o.cam.lon = ll.lng; o.cam.acc = null; o.cam.posSrc = 'set by hand'; loadFor(o).catch(() => {}); recompute(); });
@@ -2017,7 +2057,7 @@ function renderRoad() {
     h('div', { class: 'carousel' }, h('button', { class: 'btn small', disabled: roadState.idx === 0, onclick: () => { roadState.idx--; renderRoad(); } }, '‹ Prev'),
       h('span', { class: 'pos' }, `${roadState.idx + 1} / ${x.photos.length} · ${fmtDate(o.created)}`),
       h('button', { class: 'btn small', disabled: roadState.idx >= x.photos.length - 1, onclick: () => { roadState.idx++; renderRoad(); } }, 'Next ›')),
-    h('button', { class: 'btn small', onclick: () => openDetail(o.id) }, 'Open this photo to mark points')), h('div', { id: 'roadmap', class: 'mapbox' })));
+    h('button', { class: 'btn small', onclick: () => openDetail(o.id) }, 'Open this photo to mark points')), h('div', {}, h('div', { id: 'roadmap', class: 'mapbox' }), h('div', { class: 'muted small', id: 'maplegend', style: 'margin-top:4px' }))));
   // consolidated tag form
   const pr = proposals(x.marks); const sheetMark = x.marks.find(m => m.a.sheet && m.a.status !== 'uploaded');
   const values = Object.assign({}, sheetMark ? sheetMark.a.values : {});
@@ -2041,7 +2081,8 @@ function renderRoad() {
     toast('Saved as one change for this road. Approve it below.'); renderRoad();
   } }, 'Save road details')));
   v.append(h('h3', {}, 'Consolidated change'), form);
-  v.append(h('h3', {}, 'What the camera found'), visionCard(x, values));
+  const sm = x.photos.some(p => p.vision && p.vision.v === 2) ? visionSummary(x) : null;
+  v.append(h('h3', {}, 'What the camera found'), visionCard(x, values, sm));
 
   v.append(h('h3', {}, 'All marks on this road'));
   const pend = x.marks.filter(m => m.a.status === 'pending');
@@ -2050,11 +2091,60 @@ function renderRoad() {
   x.marks.forEach((m, i) => list.append(changeCard(m.o, m.a, i + 1, renderRoad)));
   if (!x.marks.length) list.append(h('p', { class: 'muted' }, 'No marks yet.'));
   v.append(list);
-  setTimeout(() => {
-    MAP = baseMap('roadmap', [o.cam.lat, o.cam.lon], 17); const ctx = osmOf(o);
-    if (x.way && ctx) { const line = L.polyline(x.way.nds.map(n => ctx.nodes[n]).filter(Boolean).map(n => [n.lat, n.lon]), { color: '#f2a100', weight: 7, opacity: .75 }).addTo(MAP); MAP.fitBounds(line.getBounds(), { maxZoom: 18, padding: [20, 20] }); }
-    x.photos.forEach((p, i) => L.marker([p.cam.lat, p.cam.lon], { icon: L.divIcon({ className: 'lf-dot' + (i === roadState.idx ? ' cur' : ''), iconSize: i === roadState.idx ? [16, 16] : [11, 11] }) }).on('click', () => { roadState.idx = i; renderRoad(); }).addTo(MAP));
-  }, 0);
+  setTimeout(() => drawRoadMap(x, sm), 0);
+}
+
+/* ---- 2D map of everything the camera found along one road ---- */
+const KIND_COLOR = { lamp: '#ff3df0', utility: '#00c8ff', sign: '#e8c400', signal: '#ff8a00', hydrant: '#ff4040', drain: '#2ecc40', cabinet: '#aaaaaa', bench: '#b08060', bin: '#b08060', mailbox: '#d04040', crosswalk: '#ffffff' };
+let selLayer = null, roadSm = null, roadX = null;
+function offsetLine(ctx, w, off) { // a polyline parallel to the way, `off` metres to its right
+  const g = w.nds.map(n => ctx.nodes[n]).filter(Boolean); if (g.length < 2) return [];
+  const pr = mkProj(g[0].lat, g[0].lon), P = g.map(n => pr.fwd(n.lat, n.lon)), out = [];
+  for (let i = 0; i < P.length - 1; i++) { const [A, B] = [P[i], P[i + 1]]; const Lg = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1; const nx = (B[1] - A[1]) / Lg * off, ny = -(B[0] - A[0]) / Lg * off;
+    const a = pr.inv(A[0] + nx, A[1] + ny), b = pr.inv(B[0] + nx, B[1] + ny); out.push([[a.lat, a.lon], [b.lat, b.lon]]); }
+  return out;
+}
+function drawRoadMap(x, sm) {
+  roadSm = sm; roadX = x; const o = x.photos[roadState.idx];
+  MAP = L.map('roadmap', { zoomControl: true, preferCanvas: true }).setView([o.cam.lat, o.cam.lon], 18);
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(MAP);
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19, attribution: 'Imagery © Esri' });
+  L.control.layers({ 'OSM map': osm, 'Esri imagery': sat }).addTo(MAP);
+  const ctx = x.photos.map(osmOf).find(c => c && c.ways[x.id]); const bounds = [];
+  if (x.way && ctx) {
+    const ll = x.way.nds.map(n => ctx.nodes[n]).filter(Boolean).map(n => [n.lat, n.lon]); bounds.push(...ll);
+    L.polyline(ll, { color: '#f2a100', weight: 3, opacity: .9 }).bindTooltip('OSM centreline').addTo(MAP);
+    const { w: wd, est } = roadWidth(x.way.tags);
+    for (const sg of [-1, 1]) for (const seg of offsetLine(ctx, x.way, sg * wd / 2)) L.polyline(seg, { color: '#f2a100', weight: 2, opacity: .8, dashArray: est ? '6 6' : null, interactive: false }).addTo(MAP);
+    for (const [id, nd] of Object.entries(ctx.nodes)) { const l = poiLabel(nd.tags); if (!l) continue; L.circleMarker([nd.lat, nd.lon], { radius: 5, color: '#1f5fae', weight: 2, fillColor: '#7fb0ff', fillOpacity: .9 }).bindTooltip('In OSM: ' + l).addTo(MAP); }
+  }
+  // kerb and road-edge points measured in each photo, placed with that photo's current (aligned) position
+  for (const p of x.photos) { const ep = p.vision && p.vision.v === 2 && p.vision.res.edgePx; if (!ep) continue; const C = obsCam(p), pr = mkProj(p.cam.lat, p.cam.lon);
+    for (const [ex, ey, k] of [...ep.L, ...ep.R]) { const g = groundOf(C, ex, ey); if (!g || Math.hypot(...g) > 40) continue; const ll = pr.inv(g[0], g[1]);
+      L.circleMarker([ll.lat, ll.lon], { radius: 2.2, stroke: false, fillColor: k ? '#ffd23f' : '#c0c8c4', fillOpacity: .95, interactive: false }).addTo(MAP); } }
+  x.photos.forEach((p, i) => { bounds.push([p.cam.lat, p.cam.lon]); L.marker([p.cam.lat, p.cam.lon], { icon: L.divIcon({ className: 'lf-dot' + (i === roadState.idx ? ' cur' : ''), iconSize: i === roadState.idx ? [16, 16] : [10, 10] }) }).bindTooltip('Photo ' + (i + 1)).on('click', () => { roadState.idx = i; renderRoad(); }).addTo(MAP); });
+  if (sm) for (const c of sm.clusters) {
+    const col = c.osm ? '#2ecc40' : c.taken ? '#888' : (KIND_COLOR[c.kind] || '#fff'); const n = Math.min(9, c.photos);
+    const m = L.marker([c.lat, c.lon], { draggable: !c.osm && !c.taken, icon: L.divIcon({ className: 'lf-feat', html: `<div style="width:${12 + n * 2}px;height:${12 + n * 2}px;border-radius:50%;background:${col};border:2px solid #000;box-shadow:0 0 0 2px #fff;display:grid;place-items:center;font:700 10px ui-monospace,monospace;color:#000">${c.photos}</div>`, iconSize: [16 + n * 2, 16 + n * 2] }) })
+      .bindTooltip(`${KIND_LABEL[c.kind]}${c.height ? ` ~${Math.round(c.height)} m` : ''} · ${c.photos} photos, ${c.trips} pass${c.trips > 1 ? 'es' : ''}${c.osm ? ' · in OSM' : c.moved ? ' · moved by you' : ''}${!c.osm && !c.taken ? ' · drag to adjust' : ''}`).addTo(MAP);
+    m.on('click', () => { roadState.sel = c.key; drawSelection(); });
+    m.on('dragend', () => { const ll = m.getLatLng(); const list2 = loadLS('lm.clusterPos', []).filter(m2 => !(m2.kind === c.kind && Math.hypot(...mkProj(m2.lat0, m2.lon0).fwd((c.calc || c).lat, (c.calc || c).lon)) < 5));
+      list2.push({ kind: c.kind, lat0: (c.calc || c).lat, lon0: (c.calc || c).lon, lat: ll.lat, lon: ll.lng }); saveLS('lm.clusterPos', list2); c.lat = ll.lat; c.lon = ll.lng; c.moved = true; roadState.sel = c.key; drawSelection(); toast('Position saved. "Add" will use it.'); });
+    bounds.push([c.lat, c.lon]);
+  }
+  selLayer = L.layerGroup().addTo(MAP); drawSelection();
+  if (bounds.length) MAP.fitBounds(bounds, { padding: [24, 24], maxZoom: 20 });
+  const lg = $('#maplegend'); if (lg) lg.textContent = 'Orange: OSM road and its kerbs (dashed if the width is estimated). Yellow dots: kerbs the camera found; grey dots: other road edges. Blue: objects already in OSM. Numbered circles: objects the camera found (number = photos it was seen in); tap one to see each photo\'s sighting, drag to adjust.';
+}
+function drawSelection() {
+  if (!selLayer || !roadSm) return; selLayer.clearLayers(); const c = roadSm.clusters.find(c2 => c2.key === roadState.sel); if (!c) return;
+  for (const v of c.views) {
+    L.polyline([[v.o.cam.lat, v.o.cam.lon], [v.lat, v.lon]], { color: KIND_COLOR[c.kind] || '#fff', weight: 1.5, opacity: .9, dashArray: '4 4', interactive: false }).addTo(selLayer);
+    L.circleMarker([v.lat, v.lon], { radius: 4, color: '#000', weight: 1, fillColor: KIND_COLOR[c.kind] || '#fff', fillOpacity: 1 }).bindTooltip(`Photo ${roadX.photos.indexOf(v.o) + 1}: ${fmtM(v.dist)} from the camera`).on('click', () => { roadState.idx = roadX.photos.indexOf(v.o); renderRoad(); }).addTo(selLayer);
+  }
+  const spread = Math.max(...c.views.map(v => Math.hypot(...mkProj(c.lat, c.lon).fwd(v.lat, v.lon))));
+  L.circle([c.lat, c.lon], { radius: Math.max(0.5, spread), color: KIND_COLOR[c.kind] || '#fff', weight: 1, fillOpacity: 0.08, interactive: false }).addTo(selLayer);
+  if (MAP) MAP.panTo([c.lat, c.lon]);
 }
 function cropURL(o, box, pad = 0.4) {
   const id = o.id + box.join(); if (cropCache.has(id)) return cropCache.get(id);
@@ -2065,13 +2155,13 @@ function cropURL(o, box, pad = 0.4) {
   cropCache.set(id, p); return p;
 }
 const cropCache = new Map();
-function visionCard(x, values) {
+function visionCard(x, values, smIn) {
   const card = h('div', { class: 'card stack' }); const done = x.photos.filter(o => o.vision && o.vision.v === 2).length;
   card.append(progressBox());
   card.append(h('div', { class: 'row' }, h('span', { style: 'flex:1' }, `${done} of ${x.photos.length} photos analysed on this device.`),
     done < x.photos.length ? h('button', { class: 'btn small primary', onclick: () => runAnalysis(x.photos, shortName(x.way)) }, `Analyse ${x.photos.length - done} photo${x.photos.length - done > 1 ? 's' : ''}`) : null));
   if (!done) { card.append(h('p', { class: 'muted small', style: 'margin:0' }, 'Finds kerbs, footpaths, painted lines, poles, lights, signs, drains, hydrants, barriers and overhead wires in each photo, lines each photo up with OSM, and measures the road from kerb to kerb. Everything runs on this device.')); return card; }
-  const sm = visionSummary(x); const t = x.way ? x.way.tags : {}; const sug = {};
+  const sm = smIn || visionSummary(x); const t = x.way ? x.way.tags : {}; const sug = {};
   const row = (k, v, note) => card.append(h('div', { class: 'row', style: 'gap:6px;align-items:baseline' }, h('span', { class: 'muted small', style: 'min-width:9.5em' }, k), h('b', {}, v), note ? h('span', { class: 'muted small' }, note) : null));
   if (sm.width) { row('Width, kerb to kerb', sm.width.med + ' m', `median of ${sm.width.count} photos, ±${sm.width.mad} m · OSM: ${t.width || 'not set'}`); if (sm.width.count >= 3) sug.width = String(sm.width.med); }
   else row('Width', 'not measured', 'needs photos with both edges clear and the road straight');
@@ -2098,6 +2188,7 @@ function visionCard(x, values) {
         choices.length > 1 ? sel : null, spd,
         h('button', { class: 'btn small primary', onclick: () => { const v2 = choices.length > 1 ? sel.value : choices[0][0]; if (v2 === 'speed_sign' && !(+spd.value >= 10)) return toast('Type the number on the sign.'); addFromCluster(c, v2, v2 === 'speed_sign' ? { maxspeed: String(+spd.value) } : c.kind === 'crosswalk' ? { 'crossing:markings': 'zebra' } : {}); } }, 'Add'),
         h('button', { class: 'btn small', onclick: () => { const ig = loadLS('lm.ignored', {}); ig[c.key] = Date.now(); saveLS('lm.ignored', ig); renderRoad(); } }, 'Not this'),
+        h('button', { class: 'btn small', onclick: () => { roadState.sel = c.key; drawSelection(); $('#roadmap').scrollIntoView({ block: 'center', behavior: 'smooth' }); } }, 'Map'),
         h('button', { class: 'btn small', onclick: () => openDetail(c.best.o.id) }, 'Photo')));
     }
   }

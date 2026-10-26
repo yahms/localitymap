@@ -246,7 +246,7 @@ input[type=range]{width:100%}
 
 <script>
 'use strict';
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const APP = 'LocalityMap ' + VERSION;
 
 /* ================= helpers ================= */
@@ -281,7 +281,7 @@ function twoTap(btn, label, fn) { let armed = false; btn.addEventListener('click
 
 /* ================= settings ================= */
 const DEFAULTS = { server: 'prod', clientId: '', hfov: 66, camHeight: 1.5, declination: 0, signin: 'redirect',
-  speedSwitch: 50, distStep: 15, timeStep: 2, minSpeed: 5, mountOffset: 0, carCamHeight: 1.3, liveOverlay: true, targetPasses: 2, recordVideo: false };
+  speedSwitch: 50, distStep: 15, timeStep: 2, minSpeed: 5, mountOffset: 0, carCamHeight: 1.3, liveOverlay: true, targetPasses: 2, recordVideo: false, autoAlign: true, analyseAfterDrive: false, claudeKey: '', claudeModel: 'claude-haiku-5-5', claudePhotos: 3 };
 let S = Object.assign({}, DEFAULTS, loadLS('lm.settings', loadLS('gt.settings', {})));
 const SERVERS = {
   prod: { label: 'OpenStreetMap', api: 'https://api.openstreetmap.org', web: 'https://www.openstreetmap.org' },
@@ -376,6 +376,8 @@ const PRESETS = {
   power_pole: { label: 'Power pole', group: 'furniture', type: 'node', tags: { power: 'pole' }, fields: [
     { k: 'material', label: 'Material', t: 'sel', opts: ['wood', 'concrete', 'steel'] }] },
   utility_pole: { label: 'Other utility pole', group: 'furniture', type: 'node', tags: { man_made: 'utility_pole' } },
+  power_tower: { label: 'Transmission tower', group: 'furniture', type: 'node', tags: { power: 'tower' }, fields: [
+    { k: 'design', label: 'Design', t: 'sel', opts: ['lattice', 'monopole', 'h-frame', 'portal'] }] },
   drain: { label: 'Storm drain', group: 'furniture', type: 'node', tags: { man_made: 'manhole', manhole: 'drain' } },
   hydrant: { label: 'Fire hydrant', group: 'furniture', type: 'node', tags: { emergency: 'fire_hydrant' }, fields: [
     { k: 'fire_hydrant:type', label: 'Type', t: 'sel', opts: ['underground', 'pillar'] }] },
@@ -468,6 +470,242 @@ function nearestOnSeg(P, A, B) {
   const u = L ? Math.max(0, Math.min(1, ((P[0] - A[0]) * ex + (P[1] - A[1]) * ey) / L)) : 0;
   const pt = [A[0] + u * ex, A[1] + u * ey]; return { u, pt, d: Math.hypot(P[0] - pt[0], P[1] - pt[1]) };
 }
+
+/* ================= scene geometry from a labelled image =================
+   Input: a per-pixel class map (Cityscapes classes) at W×H, the photo's RGB at the same size, and the camera.
+   Everything here is pure maths so it can be tested without a model. */
+const CS = ['road', 'sidewalk', 'building', 'wall', 'fence', 'pole', 'traffic light', 'traffic sign', 'vegetation', 'terrain', 'sky', 'person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle'];
+const CID = Object.fromEntries(CS.map((c, i) => [c, i]));
+const EDGE_OK = new Set(['sidewalk', 'terrain', 'vegetation', 'building', 'wall', 'fence', 'pole'].map(c => CID[c]));
+const VEH = new Set(['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'person', 'rider', 'train'].map(c => CID[c]));
+function groundOf(C, x, y) { const d = rayDir(C, x, y); if (d[2] > -1e-3) return null; const t = C.height / -d[2]; return [d[0] * t, d[1] * t]; }
+function fitLine(P) {
+  const n = P.length; if (n < 2) return null; let mx = 0, my = 0; for (const p of P) { mx += p[0]; my += p[1]; } mx /= n; my /= n;
+  let sxx = 0, syy = 0, sxy = 0; for (const p of P) { const a = p[0] - mx, b = p[1] - my; sxx += a * a; syy += b * b; sxy += a * b; }
+  const th = 0.5 * Math.atan2(2 * sxy, sxx - syy); const d = [Math.cos(th), Math.sin(th)];
+  let r2 = 0, lo = Infinity, hi = -Infinity; for (const p of P) { const a = p[0] - mx, b = p[1] - my; const perp = a * d[1] - b * d[0]; r2 += perp * perp; const al = a * d[0] + b * d[1]; lo = Math.min(lo, al); hi = Math.max(hi, al); }
+  return { c: [mx, my], d, rms: Math.sqrt(r2 / n), span: hi - lo, n };
+}
+// drop the worst points until the line fits (kerb pixels near cars, driveways, shadows)
+function robustLine(P) { let pts = P.slice(); for (let it = 0; it < 4 && pts.length >= 6; it++) { const f = fitLine(pts); const res = pts.map(p => Math.abs((p[0] - f.c[0]) * f.d[1] - (p[1] - f.c[1]) * f.d[0])); const lim = Math.max(0.15, 2.5 * f.rms); const keep = pts.filter((_, i) => res[i] <= lim); if (keep.length === pts.length) return f; pts = keep; } return pts.length >= 2 ? fitLine(pts) : null; }
+function camHoriz(C) { const l = Math.hypot(C.f[0], C.f[1]) || 1; return [C.f[0] / l, C.f[1] / l]; }
+const orientFwd = (f, fh) => { if (f && f.d[0] * fh[0] + f.d[1] * fh[1] < 0) f.d = [-f.d[0], -f.d[1]]; return f; };
+// Find where the road surface meets something else on each image row, both sides.
+function roadEdges(L, W, H, C) {
+  const rows = [];
+  for (let y = H - 2; y > H * 0.25; y -= 2) {
+    const d = rayDir(C, 0.5, (y + 0.5) / H); if (d[2] > -0.015) break;
+    const dist = C.height / -d[2] * Math.hypot(d[0], d[1]); if (dist < 3) continue; if (dist > 45) break;
+    const row = y * W; let x0 = Math.round(W / 2);
+    if (L[row + x0] !== 0) { let f = -1; for (let k = 1; k < W * 0.25; k++) { if (L[row + x0 - k] === 0) { f = x0 - k; break; } if (L[row + x0 + k] === 0) { f = x0 + k; break; } } if (f < 0) continue; x0 = f; }
+    const walk = (x, step) => { for (;;) { const nx = x + step; if (nx < 0 || nx >= W) return x; if (L[row + nx] === 0) { x = nx; continue; } let g = 0; for (let k = 2; k <= 4; k++) if (nx + step * (k - 1) >= 0 && nx + step * (k - 1) < W && L[row + nx + step * (k - 1)] === 0) { g = k - 1; break; } if (g) { x = nx + step * g; continue; } return x; } };
+    const xl = walk(x0, -1), xr = walk(x0, 1);
+    const nl = xl > 3 ? L[row + xl - 3] : 255, nr = xr < W - 4 ? L[row + xr + 3] : 255;
+    rows.push({ y, xl, xr, nl, nr, dist });
+  }
+  return rows;
+}
+// Solve tilt so both kerbs come out parallel, then read width, offsets and the road's direction.
+function solveRoad(rows, W, H, C0) {
+  const Lp = rows.filter(r => EDGE_OK.has(r.nl) && r.xl > 2).map(r => [r.xl / W, (r.y + 1) / H, r.nl]);
+  const Rp = rows.filter(r => EDGE_OK.has(r.nr) && r.xr < W - 3).map(r => [(r.xr + 1) / W, (r.y + 1) / H, r.nr]);
+  const fitAt = (tilt, pts) => { const Ct = { ...C0, ...tiltBasis(C0, tilt) }; const g = pts.map(p => groundOf(Ct, p[0], p[1])).filter(Boolean); return { Ct, line: g.length >= 6 ? orientFwd(robustLine(g), camHoriz(Ct)) : null }; };
+  const good = f => f && f.n >= 6 && f.span >= 5 && f.rms < 0.35;
+  let best = null;
+  if (Lp.length >= 6 && Rp.length >= 6) {
+    const score = t => { const a = fitAt(t, Lp).line, b = fitAt(t, Rp).line; if (!good(a) || !good(b)) return Infinity; return Math.abs(Math.atan2(a.d[0] * b.d[1] - a.d[1] * b.d[0], a.d[0] * b.d[0] + a.d[1] * b.d[1])); };
+    let bt = 0, bs = score(0);
+    for (let t = -5; t <= 5.001; t += 0.25) { const sc = score(t); if (sc < bs) { bs = sc; bt = t; } }
+    for (let t = bt - 0.25; t <= bt + 0.25; t += 0.02) { const sc = score(t); if (sc < bs) { bs = sc; bt = t; } }
+    if (bs < 2 * D2R) best = { tilt: Math.round(bt * 100) / 100, parallelErr: bs * R2D };
+  }
+  const tilt = best ? best.tilt : 0; const A = fitAt(tilt, Lp), B = fitAt(tilt, Rp); const Ct = A.Ct; const fh = camHoriz(Ct);
+  const lf = good(A.line) ? A.line : null, rf = good(B.line) ? B.line : null;
+  if (!lf && !rf) return null;
+  let dir = lf && rf ? [lf.d[0] + rf.d[0], lf.d[1] + rf.d[1]] : (lf || rf).d; const dl = Math.hypot(...dir); dir = [dir[0] / dl, dir[1] / dl];
+  const nrm = [dir[1], -dir[0]];   // right-hand normal of the road direction
+  const offL = lf ? lf.c[0] * nrm[0] + lf.c[1] * nrm[1] : null, offR = rf ? rf.c[0] * nrm[0] + rf.c[1] * nrm[1] : null;
+  const mode = arr => { const c = {}; arr.forEach(v => c[v] = (c[v] || 0) + 1); return +Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0]; };
+  return { tiltSolved: !!best, tilt, parallelErr: best ? best.parallelErr : null, dirWorld: dir, relHead: angDiff(headingOf([dir[0], dir[1], 0]), headingOf([fh[0], fh[1], 0])),
+    offL, offR, width: offL != null && offR != null ? offR - offL : null, rmsL: lf && lf.rms, rmsR: rf && rf.rms,
+    nl: lf ? CS[mode(Lp.map(p => p[2]))] : null, nr: rf ? CS[mode(Rp.map(p => p[2]))] : null, Ct };
+}
+// Painted lines: bright, unsaturated (white) or yellow pixels inside the road, clustered by their distance from the left kerb.
+function findMarkings(L, rgb, W, H, rows, road) {
+  if (!road || road.offL == null) return null;
+  const C = road.Ct, dir = road.dirWorld, nrm = [dir[1], -dir[0]]; const hits = []; let used = 0;
+  for (const r of rows) {
+    if (r.dist > 30) continue; const row = r.y * W; const lum = []; for (let x = r.xl; x <= r.xr; x++) { const i = (row + x) * 4; lum.push(0.3 * rgb[i] + 0.59 * rgb[i + 1] + 0.11 * rgb[i + 2]); }
+    if (lum.length < 8) continue; used++; const med = lum.slice().sort((a, b) => a - b)[lum.length >> 1]; const thr = med + Math.max(35, 0.3 * med);
+    let run = null;
+    for (let x = r.xl; x <= r.xr + 1; x++) {
+      const i = (row + x) * 4; const on = x <= r.xr && L[row + x] === 0 && lum[x - r.xl] > thr && (Math.max(rgb[i], rgb[i + 1], rgb[i + 2]) - Math.min(rgb[i], rgb[i + 1], rgb[i + 2]) < 60 || (rgb[i] > rgb[i + 2] + 40 && rgb[i + 1] > rgb[i + 2] + 25));
+      if (on) { if (!run) run = { a: x, b: x }; else run.b = x; }
+      else if (run) { const g = groundOf(C, (run.a + run.b + 1) / 2 / W, (r.y + 0.5) / H); if (g) { const gw = groundOf(C, (run.b + 1) / W, (r.y + 0.5) / H), ga = groundOf(C, run.a / W, (r.y + 0.5) / H); const wm = gw && ga ? Math.hypot(gw[0] - ga[0], gw[1] - ga[1]) : 0; if (wm < 0.6) hits.push({ s: g[0] * nrm[0] + g[1] * nrm[1] - road.offL, row: r.y }); } run = null; }
+    }
+  }
+  if (!used) return null;
+  const bins = {}; for (const h of hits) { const b = Math.round(h.s / 0.25); (bins[b] = bins[b] || new Set()).add(h.row); }
+  const keys = Object.keys(bins).map(Number).sort((a, b) => a - b); const peaks = [];
+  for (const k of keys) { const cov = (bins[k].size + (bins[k - 1]?.size || 0) * 0.5 + (bins[k + 1]?.size || 0) * 0.5) / used; if (cov < 0.12) continue; const last = peaks[peaks.length - 1]; if (last && k - last.k <= 2) { if (cov > last.cov) Object.assign(last, { k, cov }); } else peaks.push({ k, cov }); }
+  const width = road.width ?? Infinity;
+  const lines = peaks.map(p => ({ at: Math.round(p.k * 0.25 * 100) / 100, type: p.cov > 0.6 ? 'solid' : 'dashed', cov: Math.round(p.cov * 100) / 100 })).filter(l => l.at > 0.5 && l.at < width - 0.5);
+  const lanes = Number.isFinite(width) ? (lines.length ? lines.length + 1 : (width < 5.5 ? 1 : null)) : null;
+  return { present: lines.length > 0, lines, lanes: lanes && width / lanes >= 2.4 && width / lanes <= 5 ? lanes : null };
+}
+// Poles, signs, signals, vegetation and vehicles as connected blobs; positions from where they meet the ground.
+function findObjects(L, W, H, C) {
+  const want = new Map([[CID.pole, 'pole'], [CID['traffic sign'], 'sign'], [CID['traffic light'], 'signal'], [CID.vegetation, 'vegetation'], [CID.car, 'car'], [CID.truck, 'car'], [CID.bus, 'car']]);
+  const seen = new Uint8Array(W * H), out = [];
+  for (let i = 0; i < W * H; i++) {
+    if (seen[i] || !want.has(L[i])) continue; const cls = L[i], stack = [i]; seen[i] = 1; let n = 0, minY = H, maxY = 0, sx = 0, minX = W, maxX = 0; const bottomXs = [];
+    while (stack.length) { const j = stack.pop(); n++; const x = j % W, y = (j / W) | 0; sx += x; if (y < minY) minY = y; if (y > maxY) { maxY = y; bottomXs.length = 0; } if (y === maxY) bottomXs.push(x); if (x < minX) minX = x; if (x > maxX) maxX = x;
+      for (const k of [j - 1, j + 1, j - W, j + W]) if (k >= 0 && k < W * H && !seen[k] && L[k] === cls && Math.abs((k % W) - x) <= 1) { seen[k] = 1; stack.push(k); } }
+    const kind = want.get(cls); const minPx = kind === 'vegetation' ? W * H * 0.004 : kind === 'car' ? W * H * 0.002 : 12; if (n < minPx) continue;
+    const bx = bottomXs.reduce((a, b) => a + b, 0) / bottomXs.length; const base = maxY >= H - 2 ? null : groundOf(C, (bx + 0.5) / W, (maxY + 1) / H);
+    let height = null; if (base) { const dist = Math.hypot(...base); const top = rayDir(C, (bx + 0.5) / W, minY / H); height = C.height + top[2] / Math.hypot(top[0], top[1]) * dist; }
+    if (kind === 'pole' && (!base || height < 2 || Math.hypot(...base) > 45)) continue;
+    out.push({ kind, x: (bx + 0.5) / W, y: (maxY + 1) / H, top: minY / H, base, height: height && Math.round(height * 10) / 10, px: n, wide: (maxX - minX) / W });
+  }
+  return out;
+}
+function analyseScene(L, rgb, W, H, C0) {
+  const C = { ...C0 };
+  const rows = roadEdges(L, W, H, C); const road = solveRoad(rows, W, H, C);
+  const Cr = road ? road.Ct : C; const marks = findMarkings(L, rgb, W, H, rows, road); const objects = findObjects(L, W, H, Cr);
+  // vehicles sitting on the road: their lateral position hints at lane centres
+  const cars = road && road.offL != null ? objects.filter(o => o.kind === 'car' && o.base).map(o => { const n = [road.dirWorld[1], -road.dirWorld[0]]; return Math.round((o.base[0] * n[0] + o.base[1] * n[1] - road.offL) * 10) / 10; }) : [];
+  const counts = {}; for (let i = 0; i < L.length; i++) if (L[i] !== 255) counts[CS[L[i]]] = (counts[CS[L[i]]] || 0) + 1;
+  const share = Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, Math.round(v / L.length * 1000) / 1000]));
+  if (road) delete road.Ct;
+  return { road, markings: marks, objects: objects.map(o => ({ ...o, base: undefined })), cars, share };
+}
+
+/* ================= vision runtime ================= */
+const TJS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
+const SEG_MODEL = 'Xenova/segformer-b0-finetuned-cityscapes-768-768';
+const SEG_COLORS = [[128, 64, 128], [244, 35, 232], [70, 70, 70], [102, 102, 156], [190, 153, 153], [255, 200, 0], [250, 170, 30], [220, 220, 0], [107, 142, 35], [152, 251, 152], [70, 130, 180], [220, 20, 60], [255, 0, 0], [0, 0, 142], [0, 0, 70], [0, 60, 100], [0, 80, 100], [0, 0, 230], [119, 11, 32]];
+let TJS = null, segPipe = null, segLoading = null;
+function segmenter(status) {
+  if (segPipe) return Promise.resolve(segPipe);
+  if (!segLoading) segLoading = (async () => {
+    status && status('Loading the street-scene model (about 15 MB, first time only)…');
+    TJS = await import(TJS_URL);
+    try { segPipe = await TJS.pipeline('image-segmentation', SEG_MODEL, { device: 'webgpu' }); segPipe.dev = 'GPU'; }
+    catch { segPipe = await TJS.pipeline('image-segmentation', SEG_MODEL); segPipe.dev = 'CPU'; }
+    return segPipe;
+  })().catch(e => { segLoading = null; throw new Error('Could not load the vision model (' + e.message + '). It needs a connection the first time.'); });
+  return segLoading;
+}
+async function segmentPhoto(o, AW = 640) {
+  const pipe = await segmenter(); const bmp = await createImageBitmap(o.photo);
+  const W = AW, H = Math.round(o.img.h * AW / o.img.w); const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(bmp, 0, 0, W, H);
+  const raw = await TJS.RawImage.fromBlob(await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92)));
+  const out = await pipe(raw); const L = new Uint8Array(W * H).fill(255);
+  for (const m of out) { const id = CID[m.label]; if (id == null) continue; const d = m.mask.data, mw = m.mask.width, mh = m.mask.height;
+    if (mw === W && mh === H) { for (let i = 0; i < d.length; i++) if (d[i]) L[i] = id; }
+    else for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (d[Math.floor(y * mh / H) * mw + Math.floor(x * mw / W)]) L[y * W + x] = id; }
+  return { L, rgb: g.getImageData(0, 0, W, H).data, W, H };
+}
+const rle = L => { const out = []; let v = L[0], n = 0; for (let i = 0; i < L.length; i++) { if (L[i] === v) n++; else { out.push(v, n); v = L[i]; n = 1; } } out.push(v, n); return out; };
+function segImageURL(vis) {
+  const c = document.createElement('canvas'); c.width = vis.W; c.height = vis.H; const g = c.getContext('2d'); const im = g.createImageData(vis.W, vis.H); let i = 0;
+  for (let k = 0; k < vis.rle.length; k += 2) { const col = SEG_COLORS[vis.rle[k]]; for (let n = 0; n < vis.rle[k + 1]; n++, i++) if (col) { im.data.set(col, i * 4); im.data[i * 4 + 3] = 255; } }
+  g.putImageData(im, 0, 0); return c.toDataURL('image/png');
+}
+async function analysePhoto(o) {
+  const seg = await segmentPhoto(o);
+  const pose0 = { adj: o.cam.adj || 0, tilt: o.cam.tilt || 0, lat: o.cam.lat, lon: o.cam.lon, shift: o.cam.shift || 0 };
+  const C0 = { ...obsCam(o), w: seg.W, h: seg.H };
+  const res = analyseScene(seg.L, seg.rgb, seg.W, seg.H, C0);
+  o.vision = { at: new Date().toISOString(), model: SEG_MODEL, W: seg.W, H: seg.H, rle: rle(seg.L), res, pose0 };
+  if (S.autoAlign) autoAlign(o);
+  o.anns.forEach(a => resolveAnn(o, a)); roadCache.clear(); saveObs(o);
+  return o.vision;
+}
+// Use the kerbs found in the photo to correct this photo's tilt, heading and sideways position against the OSM road.
+function autoAlign(o) {
+  const v = o.vision, rd = v && v.res && v.res.road; if (!rd) return null;
+  const p0 = v.pose0; const out = { tilt: 0, turn: 0, shift: 0 };
+  o.cam.tilt = p0.tilt + (rd.tiltSolved ? rd.tilt : 0); out.tilt = rd.tiltSolved ? rd.tilt : 0;
+  o.cam.adj = p0.adj; o.cam.lat = p0.lat; o.cam.lon = p0.lon; o.cam.shift = p0.shift;
+  const ctx = osmOf(o); const ri = ctx && roadInfo(o, true); const way = ri && ctx.ways[ri.id];
+  if (way) {
+    const pr = mkProj(p0.lat, p0.lon), pts = wayPts(ctx, way, pr); let best = null;
+    for (let i = 0; i < pts.length - 1; i++) { if (!pts[i] || !pts[i + 1]) continue; const r = nearestOnSeg([0, 0], pts[i], pts[i + 1]); if (!best || r.d < best.d) best = { ...r, A: pts[i], B: pts[i + 1] }; }
+    if (best && best.d < 30) {
+      const measured = headingOf([rd.dirWorld[0], rd.dirWorld[1], 0]); let sb = headingOf([best.B[0] - best.A[0], best.B[1] - best.A[1], 0]); if (Math.abs(angDiff(sb, measured)) > 90) sb = norm360(sb + 180);
+      const turn = angDiff(sb, measured);
+      if (Math.abs(turn) <= 20) {
+        o.cam.adj = p0.adj + turn; out.turn = Math.round(turn * 10) / 10;
+        const n = [Math.cos(sb * D2R), -Math.sin(sb * D2R)];  // right-hand normal of the OSM road direction
+        const sOsm = -(best.pt[0] * n[0] + best.pt[1] * n[1]);  // where the camera is now, across the OSM centreline
+        let sWant = null; const wTag = parseFloat(way.tags.width);
+        if (rd.offL != null && rd.offR != null) sWant = -(rd.offL + rd.offR) / 2;
+        else if (wTag > 1 && rd.offL != null) sWant = -(rd.offL + wTag / 2); else if (wTag > 1 && rd.offR != null) sWant = -(rd.offR - wTag / 2);
+        if (sWant != null && Math.abs(sWant - sOsm) < 8) { const m = sWant - sOsm; const ll = pr.inv(n[0] * m, n[1] * m); o.cam.lat = ll.lat; o.cam.lon = ll.lon; o.cam.shift = Math.round((p0.shift + m) * 100) / 100; out.shift = Math.round(m * 100) / 100; }
+      }
+    }
+  }
+  v.aligned = out; return out;
+}
+function undoAlign(o) { const p0 = o.vision && o.vision.pose0; if (!p0) return; Object.assign(o.cam, { adj: p0.adj, tilt: p0.tilt, lat: p0.lat, lon: p0.lon, shift: p0.shift }); delete o.vision.aligned; o.anns.forEach(a => resolveAnn(o, a)); roadCache.clear(); saveObs(o); }
+// One job at a time, with progress for whoever is showing it.
+const vjob = { running: false, cancel: false, done: 0, total: 0, label: '', listeners: new Set() };
+const vNotify = () => vjob.listeners.forEach(f => { try { f(); } catch {} });
+async function runAnalysis(list, label) {
+  if (vjob.running) { toast('Already analysing: ' + vjob.label); return; }
+  const todo = list.filter(o => !o.vision); if (!todo.length) { toast('Those photos are already analysed.'); return; }
+  Object.assign(vjob, { running: true, cancel: false, done: 0, total: todo.length, label, status: '' }); vNotify();
+  try {
+    await segmenter(t => { vjob.status = t; vNotify(); });
+    for (const o of todo) { if (vjob.cancel) break; vjob.status = `${segPipe.dev} · photo ${vjob.done + 1} of ${vjob.total}`; vNotify(); await loadFor(o).catch(() => {}); try { await analysePhoto(o); } catch (e) { console.warn(e); } vjob.done++; vNotify(); }
+    toast(vjob.cancel ? `Stopped after ${vjob.done} photos.` : `Analysed ${vjob.done} photos.`);
+  } catch (e) { toast(e.message, 7000); }
+  vjob.running = false; vNotify();
+  if (view === 'road') renderRoad(); else if (view === 'detail') renderDetail(); else if (view === 'surveys') renderSurveys();
+}
+function progressBox() {
+  const box = h('div', { class: 'card', style: 'margin:8px 0' });
+  const draw = () => { if (!box.isConnected && box.dataset.on) { vjob.listeners.delete(draw); return; } box.dataset.on = '1'; box.innerHTML = '';
+    box.hidden = !vjob.running; if (!vjob.running) return;
+    box.append(h('div', { class: 'row' }, h('b', { style: 'flex:1' }, 'Analysing ' + vjob.label), h('button', { class: 'btn small', onclick: () => { vjob.cancel = true; } }, 'Stop')),
+      h('div', { class: 'muted small' }, vjob.status || ''), h('progress', { max: vjob.total || 1, value: vjob.done, style: 'width:100%' })); };
+  vjob.listeners.add(draw); draw(); return box;
+}
+// Combine what the photos of one road say about it.
+function visionSummary(x) {
+  const widths = [], sides = { left: {}, right: {} }, mk = { yes: 0, no: 0 }, lanes = {}, objs = []; let n = 0;
+  for (const o of x.photos) {
+    const v = o.vision && o.vision.res; if (!v) continue; n++;
+    const ri = roadInfo(o); const mine = ri && ri.id === x.id; const flip = mine && ri.dir === 'back'; const rd = v.road;
+    if (rd && mine) {
+      if (rd.width && rd.tiltSolved && rd.rmsL < 0.25 && rd.rmsR < 0.25 && rd.width > 2.5 && rd.width < 30) widths.push(rd.width);
+      const Ls = flip ? rd.nr : rd.nl, Rs = flip ? rd.nl : rd.nr; if (Ls) sides.left[Ls] = (sides.left[Ls] || 0) + 1; if (Rs) sides.right[Rs] = (sides.right[Rs] || 0) + 1;
+    }
+    if (mine && v.markings) { v.markings.present ? mk.yes++ : mk.no++; if (v.markings.lanes) lanes[v.markings.lanes] = (lanes[v.markings.lanes] || 0) + 1; }
+    const C = obsCam(o), pr = mkProj(o.cam.lat, o.cam.lon);
+    for (const ob of v.objects || []) if (['pole', 'sign', 'signal'].includes(ob.kind)) { const g = groundOf(C, ob.x, ob.y); if (!g || Math.hypot(...g) > 35) continue; const ll = pr.inv(g[0], g[1]); objs.push({ ...ob, lat: ll.lat, lon: ll.lon, o, dist: Math.hypot(...g) }); }
+  }
+  const sorted = widths.slice().sort((a, b) => a - b), med = sorted.length ? sorted[sorted.length >> 1] : null;
+  const mad = med != null ? sorted.map(w => Math.abs(w - med)).sort((a, b) => a - b)[sorted.length >> 1] : null;
+  const clusters = [];
+  for (const ob of objs) { const pr = mkProj(ob.lat, ob.lon); let c = clusters.find(c => c.kind === ob.kind && Math.hypot(...pr.fwd(c.lat, c.lon)) < 3.5);
+    if (!c) { c = { kind: ob.kind, lat: ob.lat, lon: ob.lon, views: [] }; clusters.push(c); } c.views.push(ob); c.lat = c.views.reduce((a, v) => a + v.lat, 0) / c.views.length; c.lon = c.views.reduce((a, v) => a + v.lon, 0) / c.views.length; }
+  const ctx = x.photos.map(osmOf).find(Boolean);
+  for (const c of clusters) {
+    c.photos = new Set(c.views.map(v => v.o.id)).size; c.trips = new Set(c.views.map(v => v.o.trip || v.o.id)).size; c.best = c.views.slice().sort((a, b) => Math.abs(a.dist - 15) - Math.abs(b.dist - 15))[0];
+    const hs = c.views.map(v => v.height).filter(Boolean).sort((a, b) => a - b); c.height = hs.length ? hs[hs.length >> 1] : null;
+    if (ctx) { const pr = mkProj(c.lat, c.lon); for (const [id, nd] of Object.entries(ctx.nodes)) { const l = poiLabel(nd.tags); if (l && Math.hypot(...pr.fwd(nd.lat, nd.lon)) < 5) { c.osm = { id, label: l }; break; } } }
+    c.taken = [...OBS.values()].some(o => o.anns.some(a => a.lat != null && a.status !== 'rejected' && Math.hypot(...pr0(a, c)) < 4));
+  }
+  const pick = side => { const e = Object.entries(sides[side]); const tot = e.reduce((a, [, v]) => a + v, 0); if (!tot) return null; const sw = sides[side].sidewalk || 0; return { footpath: sw / tot >= 0.5, share: sw / tot, n: tot, other: e.sort((a, b) => b[1] - a[1])[0][0] }; };
+  const laneBest = Object.entries(lanes).sort((a, b) => b[1] - a[1])[0];
+  return { n, width: med != null ? { med: Math.round(med * 10) / 10, mad: Math.round(mad * 10) / 10, count: widths.length } : null, left: pick('left'), right: pick('right'), markings: mk, lanes: laneBest ? { value: +laneBest[0], count: laneBest[1] } : null,
+    clusters: clusters.filter(c => c.photos >= 2 || x.photos.length < 3) };
+}
+const pr0 = (a, c) => mkProj(c.lat, c.lon).fwd(a.lat, a.lon);
 
 /* ================= OSM data in shared cells (~450 m squares) ================= */
 const CELL_LAT = 0.004, CELL_LON = 0.005;
@@ -979,6 +1217,7 @@ async function endDrive() {
   if (!n) return toast('Drive ended. No photos were taken (it only shoots above ' + S.minSpeed + ' km/h).');
   toast(`Drive saved: ${n} photos over ${km} km. Refining positions from the GPS trail…`, 5000);
   try { const r = await refineTrip(trip); if (r) toast(`Drive saved and refined: ${r.n} photos placed using the whole GPS trail.`, 6000); } catch (e) { toast('Drive saved; refining failed: ' + e.message); }
+  if (S.analyseAfterDrive) runAnalysis([...OBS.values()].filter(o => o.trip === trip), 'the drive');
 }
 function saveTrail() { if (!drive.trail) return Promise.resolve(); return store.put('trails', drive.trail).catch(() => {}); }
 function driveTick() {
@@ -1237,6 +1476,7 @@ function renderPhotos(v) {
   const list = [...OBS.values()].sort((a, b) => b.created.localeCompare(a.created));
   const trips = new Map(); const loose = [];
   for (const o of list) { if (o.trip) { if (!trips.has(o.trip)) trips.set(o.trip, []); trips.get(o.trip).push(o); } else loose.push(o); }
+  v.append(progressBox());
   if (trips.size) {
     v.append(h('h3', {}, 'Drives'));
     const g = h('div', { class: 'stack' });
@@ -1247,6 +1487,7 @@ function renderPhotos(v) {
         h('div', { class: 'row' }, h('div', { style: 'flex:1;min-width:0' }, h('b', {}, 'Drive · ' + fmtDate(ps[ps.length - 1].created)), h('div', { class: 'muted small' }, ps.length + ' photos'), h('div', { class: 'row', style: 'gap:4px;margin-top:4px' }, statusPills(c))),
           h('button', { class: 'btn small', onclick: () => { box.innerHTML = ''; box.append(thumbGrid(ps.slice().reverse())); } }, 'Show photos'),
           h('button', { class: 'btn small', onclick: () => { survTab = 'roads'; renderSurveys(); } }, 'Review by road'),
+          h('button', { class: 'btn small', onclick: () => runAnalysis(ps.slice().reverse(), 'the drive') }, ps.every(o => o.vision) ? 'Analysed' : 'Analyse'),
           h('button', { class: 'btn small', onclick: async () => { const r = await refineTrip(id).catch(e => toast(e.message)); toast(r ? `Refined ${r.n} photos from the GPS trail.` : 'No GPS trail was recorded for this drive (drives before version 0.4).'); renderSurveys(); } }, 'Refine'),
           (loadLS('lm.trips', {})[id] || {}).videoStart ? h('button', { class: 'btn small', onclick: async () => { try { const v = await tripVideo(id); const ext = (v.mime || '').includes('webm') ? 'webm' : 'mp4'; shareFile(new File([v.blob], `localitymap-${id}.${ext}`, { type: v.blob.type })); } catch (e) { toast(e.message); } } }, 'Video') : null,
           h('button', { class: 'btn small', onclick: () => exportData(ps) }, 'Export'), del), box);
@@ -1365,7 +1606,7 @@ function drawOverlay(svg, o, opts = {}) {
     s += `<circle cx="${x}" cy="${y}" r="${r}" fill="${col[a.status] || '#f2a100'}" stroke="#fff" stroke-width="${sw}"/>`;
     s += `<text x="${x}" y="${y + r * .38}" font-size="${r * 1.05}" font-weight="700" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" fill="${a.status === 'pending' ? '#1b1300' : '#fff'}">${i + 1}</text>`;
   });
-  svg.innerHTML = s + (opts.extra || '');
+  svg.innerHTML = (opts.under || '') + s + (opts.extra || '');
 }
 function photoPane(o, opts = {}) {
   const photo = h('div', { class: 'photo' }, h('img', { src: photoURL(o), alt: 'Survey photo' }));
@@ -1380,7 +1621,7 @@ function changeCard(o, a, idx, refresh) {
   let title = P.label;
   if (P.type === 'way') title += ' · ' + (w ? wayLabel(a.wayId, w) : 'no match');
   else if (P.type === 'node') title = 'New ' + P.label.toLowerCase() + (P.onWay && w ? ' on ' + shortName(w) : '');
-  if (a.sheet) title += ' (road sheet)';
+  if (a.sheet) title += ' (road sheet)'; if (a.src === 'claude') title += ' · suggested by Claude'; else if (a.src === 'camera') title += ' · found by the camera';
   const c = h('div', { class: 'card chg' });
   c.append(h('div', { class: 'top' }, h('span', { class: 'num' }, idx), h('span', { class: 'name' }, title), h('span', { class: 'pill ' + a.status }, a.status === 'pending' ? 'to review' : a.status)));
   const diff = annDiff(o, a);
@@ -1409,7 +1650,7 @@ function changeCard(o, a, idx, refresh) {
 
 /* ================= expected vs seen ================= */
 const POI = [['highway', 'traffic_signals', 'Traffic signals'], ['highway', 'stop', 'Stop sign'], ['highway', 'give_way', 'Give way sign'], ['highway', 'crossing', 'Crossing'],
-  ['highway', 'street_lamp', 'Street light'], ['power', 'pole', 'Power pole'], ['man_made', 'utility_pole', 'Utility pole'], ['traffic_sign', null, 'Traffic sign'],
+  ['highway', 'street_lamp', 'Street light'], ['power', 'pole', 'Power pole'], ['power', 'tower', 'Transmission tower'], ['man_made', 'utility_pole', 'Utility pole'], ['traffic_sign', null, 'Traffic sign'],
   ['traffic_calming', null, 'Traffic calming'], ['highway', 'bus_stop', 'Bus stop'], ['emergency', 'fire_hydrant', 'Fire hydrant'], ['barrier', 'toll_booth', 'Toll booth'],
   ['man_made', 'street_cabinet', 'Street cabinet'], ['natural', 'tree', 'Tree']];
 const poiLabel = t => { for (const [k, v, l] of POI) if (t[k] && (v == null || t[k] === v)) return l; return null; };
@@ -1477,7 +1718,7 @@ function renderDetail() {
     trip ? h('button', { class: 'btn small', disabled: ti <= 0, onclick: () => openDetail(trip[ti - 1].id) }, '‹ Prev') : null,
     trip ? h('button', { class: 'btn small', disabled: ti >= trip.length - 1, onclick: () => openDetail(trip[ti + 1].id) }, 'Next ›') : null,
     del));
-  detailPhoto = photoPane(o, { onTap: onPhotoTap, osm: showOSM, extra: measureExtra(o) });
+  detailPhoto = photoPane(o, { onTap: onPhotoTap, osm: showOSM, extra: measureExtra(o), under: showSeg && o.vision ? `<image href="${segURL(o)}" x="0" y="0" width="${o.img.w}" height="${o.img.h}" preserveAspectRatio="none" opacity=".5"/>` : '' });
   if (measure && measure.o === o) v.append(h('div', { class: 'measurebar' }, measure.pts.length ? 'Now tap the other kerb' : 'Tap one kerb where it meets the road surface', h('button', { class: 'btn small', onclick: () => { const m = measure; measure = null; renderDetail(); openSheet(m.o, m.a, m.isNew, m.onDone, m.draft); } }, 'Cancel')));
   v.append(h('div', { class: 'panes' }, detailPhoto, h('div', { id: 'map', class: 'mapbox' })));
   const nudge = d => h('button', { class: 'btn small', onclick: () => { o.cam.adj = (o.cam.adj || 0) + d; recompute(); } }, (d > 0 ? '+' : '−') + Math.abs(d) + '°');
@@ -1493,6 +1734,7 @@ function renderDetail() {
     h('label', { class: 'toggle', style: 'margin-left:auto' }, h('input', { type: 'checkbox', checked: showOSM, onchange: e => { showOSM = e.target.checked; renderDetail(); } }), 'OSM on photo')));
   v.append(h('div', { id: 'tripFix' }));
   if (o.trip && (loadLS('lm.trips', {})[o.trip] || {}).videoStart) v.append(frameBar(o));
+  v.append(visionBar(o));
   v.append(h('p', { class: 'muted small', style: 'margin:0 0 6px' }, 'Tap the photo to mark something. The green lines are where OSM puts the kerbs (dashed when the width is only estimated). To line them up: Turn until the road runs the right way, Shift until the kerbs sit sideways in the right place, Tilt until the far kerbs meet at the right height. Every mark moves with it. Do this before measuring a width.'));
   v.append(h('div', { id: 'osmState' }));
   v.append(h('h3', {}, 'Changes'), h('div', { class: 'stack', id: 'changes' }));
@@ -1533,6 +1775,27 @@ function onPhotoTap(ev, svg) {
   a.dist = tiltDistance(o, a); a.distSrc = a.dist ? 'tilt' : null; if (!a.dist) a.dist = 15;
   openSheet(o, a, true, recompute);
 }
+/* ---- per-photo vision controls ---- */
+let showSeg = false; const segURLs = new Map();
+const segURL = o => { const k = o.id + o.vision.at; if (!segURLs.has(k)) segURLs.set(k, segImageURL(o.vision)); return segURLs.get(k); };
+function visionBar(o) {
+  const box = h('div', { class: 'card stack', style: 'margin-bottom:8px' }); box.append(progressBox());
+  if (!o.vision) { box.append(h('div', { class: 'row' }, h('span', { style: 'flex:1' }, 'Let the app find the kerbs and line this photo up automatically.'), h('button', { class: 'btn small primary', onclick: () => runAnalysis([o], 'this photo') }, 'Analyse photo'))); return box; }
+  const r = o.vision.res, rd = r.road, al = o.vision.aligned;
+  const bits = [];
+  if (rd) { if (rd.width) bits.push(`road ${rd.width.toFixed(1)} m wide`); if (rd.offL != null) bits.push(`camera ${(-rd.offL).toFixed(1)} m from the left edge`); if (rd.nl || rd.nr) bits.push(`left: ${rd.nl || '?'}, right: ${rd.nr || '?'}`); }
+  else bits.push('no clear road edges in this photo');
+  if (r.markings) bits.push(r.markings.present ? `${r.markings.lines.length} painted line${r.markings.lines.length > 1 ? 's' : ''}${r.markings.lanes ? ', ' + r.markings.lanes + ' lanes' : ''}` : 'no painted lines');
+  const n = k => r.objects.filter(x => x.kind === k).length; const ob = [['pole', 'poles'], ['sign', 'signs'], ['signal', 'signals'], ['car', 'vehicles']].filter(([k]) => n(k)).map(([k, l]) => n(k) + ' ' + l);
+  if (ob.length) bits.push(ob.join(', '));
+  box.append(h('div', { class: 'small' }, h('b', {}, 'Camera found: '), bits.join(' · ')));
+  box.append(h('div', { class: 'row' },
+    al ? h('span', { class: 'small', style: 'flex:1' }, `Lined up automatically: turned ${al.turn > 0 ? '+' : ''}${al.turn}°, tilted ${al.tilt > 0 ? '+' : ''}${al.tilt}°, shifted ${al.shift > 0 ? '+' : ''}${al.shift} m.`) : h('span', { class: 'small muted', style: 'flex:1' }, rd ? 'Not lined up automatically.' : ''),
+    al ? h('button', { class: 'btn small', onclick: () => { undoAlign(o); renderDetail(); } }, 'Undo') : rd ? h('button', { class: 'btn small', onclick: () => { autoAlign(o); o.anns.forEach(a => resolveAnn(o, a)); roadCache.clear(); saveObs(o); renderDetail(); } }, 'Line up') : null,
+    h('label', { class: 'toggle' }, h('input', { type: 'checkbox', checked: showSeg, onchange: e => { showSeg = e.target.checked; renderDetail(); } }), 'What the app sees')));
+  return box;
+}
+
 /* ---- tap both kerbs to measure road width ---- */
 let measure = null;
 function groundPoint(o, x, y) { const C = obsCam(o), d = rayDir(C, x, y); if (d[2] > -0.01) return null; const t = C.height / -d[2]; return [d[0] * t, d[1] * t]; }
@@ -1660,6 +1923,8 @@ function renderRoad() {
     toast('Saved as one change for this road. Approve it below.'); renderRoad();
   } }, 'Save road details')));
   v.append(h('h3', {}, 'Consolidated change'), form);
+  v.append(h('h3', {}, 'What the camera found'), visionCard(x, values));
+  const cr = loadLS('lm.claude', {})[x.id]; if (cr) v.append(h('h3', {}, "Claude's read of this road"), claudeCard(x, cr, values));
   v.append(h('h3', {}, 'All marks on this road'));
   const pend = x.marks.filter(m => m.a.status === 'pending');
   if (pend.length) v.append(h('button', { class: 'btn small primary', style: 'margin-bottom:8px', onclick: () => { pend.forEach(m => { if (!annWarnings(m.o, m.a).some(w => w.startsWith('No matching') || w.startsWith('Nothing'))) { m.a.status = 'approved'; saveObs(m.o); } }); renderRoad(); } }, `Approve ${pend.length} pending (skips ones without a target)`));
@@ -1672,6 +1937,134 @@ function renderRoad() {
     if (x.way && ctx) { const line = L.polyline(x.way.nds.map(n => ctx.nodes[n]).filter(Boolean).map(n => [n.lat, n.lon]), { color: '#f2a100', weight: 7, opacity: .75 }).addTo(MAP); MAP.fitBounds(line.getBounds(), { maxZoom: 18, padding: [20, 20] }); }
     x.photos.forEach((p, i) => L.marker([p.cam.lat, p.cam.lon], { icon: L.divIcon({ className: 'lf-dot' + (i === roadState.idx ? ' cur' : ''), iconSize: i === roadState.idx ? [16, 16] : [11, 11] }) }).on('click', () => { roadState.idx = i; renderRoad(); }).addTo(MAP));
   }, 0);
+}
+function visionCard(x, values) {
+  const card = h('div', { class: 'card stack' }); const done = x.photos.filter(o => o.vision).length;
+  card.append(progressBox());
+  card.append(h('div', { class: 'row' }, h('span', { style: 'flex:1' }, `${done} of ${x.photos.length} photos analysed on this device.`),
+    done < x.photos.length ? h('button', { class: 'btn small primary', onclick: () => runAnalysis(x.photos, shortName(x.way)) }, `Analyse ${x.photos.length - done} photo${x.photos.length - done > 1 ? 's' : ''}`) : null,
+    h('button', { class: 'btn small', onclick: () => claudeRoad(x) }, 'Ask Claude')));
+  if (!done) { card.append(h('p', { class: 'muted small', style: 'margin:0' }, 'Finds the road edges, footpaths, painted lines, poles, signs and signals in each photo, lines each photo up with OSM automatically, and measures the width from the kerbs. Runs on this device; about 2 s a photo with a graphics chip, slower without.')); return card; }
+  const sm = visionSummary(x); const t = x.way ? x.way.tags : {}; const sug = {};
+  const row = (k, v, note) => card.append(h('div', { class: 'row', style: 'gap:6px' }, h('span', { class: 'muted small', style: 'min-width:9.5em' }, k), h('b', {}, v), note ? h('span', { class: 'muted small' }, note) : null));
+  if (sm.width) { row('Width, kerb to kerb', sm.width.med + ' m', `median of ${sm.width.count} photos, ±${sm.width.mad} m · OSM: ${t.width || 'not set'}`); if (sm.width.count >= 3) sug.width = String(sm.width.med); }
+  else row('Width', 'not measured', 'needs photos where both kerbs are clear of parked cars');
+  const side = s => s ? (s.footpath ? `footpath (${Math.round(s.share * 100)}%)` : `no footpath: ${s.other} (${Math.round((1 - s.share) * 100)}%)`) : 'not seen';
+  row('Left side (way direction)', side(sm.left)); row('Right side', side(sm.right));
+  if (sm.left && sm.right && sm.left.n >= 3 && sm.right.n >= 3) sug.sidewalk = sm.left.footpath && sm.right.footpath ? 'both' : sm.left.footpath ? 'left' : sm.right.footpath ? 'right' : 'no';
+  const mt = sm.markings.yes + sm.markings.no; if (mt) { row('Painted lines', sm.markings.yes / mt >= 0.5 ? 'yes' : 'no', `${sm.markings.yes} of ${mt} photos`); if (mt >= 3) sug.lane_markings = sm.markings.yes / mt >= 0.5 ? 'yes' : 'no'; }
+  if (sm.lanes) { row('Lanes from the lines', String(sm.lanes.value), `${sm.lanes.count} photos · OSM: ${t.lanes || 'not set'}`); if (sm.lanes.count >= 3) sug.lanes = String(sm.lanes.value); }
+  const useful = Object.entries(sug).filter(([k, v]) => String(t[k] ?? '') !== v);
+  if (useful.length) card.append(h('button', { class: 'btn small primary', onclick: () => { Object.assign(values, Object.fromEntries(useful)); applyRoadValues(x, values); } }, 'Use in road details: ' + useful.map(([k, v]) => k + '=' + v).join(', ')));
+  card.append(h('p', { class: 'muted small', style: 'margin:0' }, 'Kerb type, sign text, lane use and power line voltage need a closer look: use Ask Claude, or check the photos yourself.'));
+  const cl = sm.clusters; if (cl.length) {
+    card.append(h('b', {}, `Poles, signs and signals: ${cl.length}`));
+    for (const c of cl) {
+      const choices = c.kind === 'pole' ? [['street_lamp', 'Street light'], ['power_pole', 'Power pole'], ['utility_pole', 'Other pole']] : c.kind === 'signal' ? [['traffic_signals', 'Traffic signals']] : [['speed_sign', 'Speed sign'], ['stop', 'Stop sign'], ['give_way', 'Give way sign']];
+      const sel = h('select', {}, choices.map(([v, l]) => h('option', { value: v }, l)));
+      card.append(h('div', { class: 'row', style: 'gap:6px' }, h('span', { style: 'flex:1;min-width:12em' }, `${c.kind === 'pole' ? 'Pole' : c.kind === 'sign' ? 'Sign' : 'Signal'}${c.height ? ' ~' + Math.round(c.height) + ' m' : ''} · ${c.photos} photos, ${c.trips} pass${c.trips > 1 ? 'es' : ''}`),
+        c.osm ? h('span', { class: 'pill approved' }, 'in OSM: ' + c.osm.label) : c.taken ? h('span', { class: 'pill' }, 'already marked') : [sel, h('button', { class: 'btn small', onclick: () => addFromCluster(c, sel.value) }, 'Add')],
+        h('button', { class: 'btn small', onclick: () => openDetail(c.best.o.id) }, 'Photo')));
+    }
+  }
+  return card;
+}
+/* ---- Claude vision: a few photos per road, structured answers mapped to OSM tags ---- */
+const drivesLeft = (lat, lon) => (lat < -9 && lat > -48 && lon > 110 && lon < 180) || (lat > 49 && lat < 61 && lon > -11 && lon < 2) || (lat > 24 && lat < 46 && lon > 122 && lon < 146) || (lat > -35 && lat < -22 && lon > 16 && lon < 33);
+async function photoB64(o, max = 1280) {
+  const bmp = await createImageBitmap(o.photo); const k = Math.min(1, max / Math.max(bmp.width, bmp.height)); const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+}
+const CLAUDE_PROMPT = (n, tags, side) => `You are helping a ground surveyor check OpenStreetMap data for one road. Below are ${n} photos taken from a vehicle or by a pedestrian on this road, numbered from 0. Traffic here drives on the ${side}.
+OpenStreetMap currently has these tags for the road: ${JSON.stringify(tags)}.
+Describe only what is clearly visible. Use "unclear" (or null for numbers) rather than guessing. "Left" and "right" are as seen in each photo, looking where the camera looks.
+Reply with JSON only, no other text, in exactly this shape:
+{"photos":[{"index":0,"footpath_left":"yes|no|unclear","footpath_right":"yes|no|unclear","kerb_left":"raised|mountable|flush|none|unclear","kerb_right":"raised|mountable|flush|none|unclear","lanes_ahead":null,"lanes_oncoming":null,"centre_line":"solid|dashed|double|none|unclear"}],
+"road":{"surface":"asphalt|concrete|chipseal|paving_stones|sett|gravel|unpaved|unclear","lane_markings":"yes|no|unclear","median":"none|painted|raised_kerb|barrier|grass|unclear","street_lights":"yes|no|unclear","parking":"none|parallel|angled|unclear","shoulder":"yes|no|unclear",
+"intersection":{"visible":false,"type":"T|crossroads|roundabout|staggered|merge|none","control":"signals|stop|give_way|none|unclear"},
+"barriers":[{"type":"guard_rail|jersey_barrier|wall|retaining_wall|fence|hedge|bollards","side":"left|right|centre","photo":0}],
+"power":{"distribution_poles":false,"overhead_low_voltage_lines":false,"transmission_towers":false,"high_voltage_lines":false},
+"notes":"one or two sentences about anything else a mapper should know"},
+"objects":[{"type":"street_lamp|power_pole|transmission_tower|speed_limit_sign|stop_sign|give_way_sign|traffic_signals|pedestrian_crossing|tree|bus_stop|fire_hydrant","photo":0,"x":0.5,"y":0.8,"text":""}]}
+For objects, x and y are the point where the object meets the ground, as fractions of the photo's width and height from the top-left. For speed limit signs put the number in "text". List each physical object once, in the photo where it is clearest.`;
+async function claudeRoad(x) {
+  if (!S.claudeKey) { toast('Add your Anthropic API key under Settings → Vision first.'); return go('settings'); }
+  const n = Math.max(1, Math.min(6, Number(S.claudePhotos) || 3)); const all = x.photos; const pick = [];
+  for (let i = 0; i < n && i < all.length; i++) pick.push(all[Math.min(all.length - 1, Math.floor((i + 0.5) * all.length / Math.min(n, all.length)))]);
+  toast(`Sending ${pick.length} photo${pick.length > 1 ? 's' : ''} to Claude…`, 60000);
+  try {
+    const content = [];
+    for (const [i, o] of pick.entries()) { content.push({ type: 'text', text: `Photo ${i}:` }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await photoB64(o) } }); }
+    const t = x.way ? Object.fromEntries(Object.entries(x.way.tags).filter(([k]) => !k.startsWith('name:'))) : {};
+    content.push({ type: 'text', text: CLAUDE_PROMPT(pick.length, t, drivesLeft(pick[0].cam.lat, pick[0].cam.lon) ? 'left' : 'right (if this is wrong, say so in notes)') });
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': S.claudeKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: S.claudeModel || 'claude-haiku-5-5', max_tokens: 2000, messages: [{ role: 'user', content }] }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status === 401 ? 'The API key was not accepted. Check it under Settings → Vision.' : (j.error && j.error.message) || ('HTTP ' + r.status));
+    const text = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join(''); const a = text.indexOf('{'), b = text.lastIndexOf('}');
+    if (a < 0) throw new Error('Claude did not return the expected answer.');
+    const result = JSON.parse(text.slice(a, b + 1));
+    const all2 = loadLS('lm.claude', {}); all2[x.id] = { at: new Date().toISOString(), model: S.claudeModel, photos: pick.map(o => o.id), result, usage: j.usage }; saveLS('lm.claude', all2);
+    $('#toast').hidden = true; toast('Claude answered. Its suggestions are listed on this road.'); if (view === 'road') renderRoad();
+  } catch (e) { $('#toast').hidden = true; toast('Claude: ' + e.message, 8000); }
+}
+// turn Claude's per-photo answers into tags along the OSM way's direction
+function claudeTags(x, cr) {
+  const R = cr.result || {}, rd = R.road || {}, sug = {}, why = [];
+  const vote = arr => { const c = {}; arr.filter(v => v && v !== 'unclear').forEach(v => c[v] = (c[v] || 0) + 1); const e = Object.entries(c).sort((a, b) => b[1] - a[1]); return e.length ? e[0][0] : null; };
+  const L = [], Rt = [], kL = [], kR = [], fw = [], bw = [];
+  for (const ph of R.photos || []) {
+    const o = OBS.get(cr.photos[ph.index]); if (!o) continue; const ri = roadInfo(o); const flip = ri && ri.id === x.id && ri.dir === 'back';
+    (flip ? Rt : L).push(ph.footpath_left); (flip ? L : Rt).push(ph.footpath_right); (flip ? kR : kL).push(ph.kerb_left); (flip ? kL : kR).push(ph.kerb_right);
+    if (Number.isInteger(ph.lanes_ahead)) (flip ? bw : fw).push(ph.lanes_ahead); if (Number.isInteger(ph.lanes_oncoming)) (flip ? fw : bw).push(ph.lanes_oncoming);
+  }
+  const fl = vote(L), fr = vote(Rt); if (fl && fr) sug.sidewalk = fl === 'yes' && fr === 'yes' ? 'both' : fl === 'yes' ? 'left' : fr === 'yes' ? 'right' : 'no';
+  const kmap = { raised: 'raised', mountable: 'rolled', flush: 'flush', none: 'no' }; const k = vote([...kL, ...kR]); if (k) sug.kerb = kmap[k];
+  const med = a => a.length ? a.slice().sort((p, q) => p - q)[a.length >> 1] : null; const f = med(fw), b = med(bw);
+  if (f != null && b != null) { sug.lanes = String(f + b); if (f + b > 1) { sug['lanes:forward'] = String(f); sug['lanes:backward'] = String(b); } } else if (f != null && !b) sug.lanes = String(f);
+  if (rd.surface && rd.surface !== 'unclear') sug.surface = rd.surface;
+  if (['yes', 'no'].includes(rd.lane_markings)) sug.lane_markings = rd.lane_markings;
+  if (['yes', 'no'].includes(rd.street_lights)) sug.lit = rd.street_lights;
+  const dv = { painted: 'line', raised_kerb: 'kerb', barrier: 'barrier', grass: 'grass_strip', none: 'no' }[rd.median]; if (dv) sug.divider = dv;
+  if (rd.parking === 'none') sug['parking:both'] = 'no';
+  if (['yes', 'no'].includes(rd.shoulder)) sug.shoulder = rd.shoulder === 'yes' ? 'both' : 'no';
+  if (rd.intersection && rd.intersection.visible && rd.intersection.type === 'roundabout') why.push('A roundabout is visible: check the junction is mapped as junction=roundabout.');
+  return { sug, why };
+}
+function claudeCard(x, cr, values) {
+  const R = cr.result || {}, rd = R.road || {}, card = h('div', { class: 'card stack' }); const t = x.way ? x.way.tags : {};
+  card.append(h('div', { class: 'muted small' }, `${cr.model} · ${cr.photos.length} photos · ${fmtDate(cr.at)}${cr.usage ? ` · ${cr.usage.input_tokens} in / ${cr.usage.output_tokens} out tokens` : ''}`));
+  const { sug, why } = claudeTags(x, cr); const useful = Object.entries(sug).filter(([k, v]) => String(t[k] ?? '') !== v);
+  card.append(h('div', { class: 'tagchips' }, Object.entries(sug).map(([k, v]) => h('span', {}, k + '=' + v))));
+  if (useful.length) card.append(h('button', { class: 'btn small primary', onclick: () => { Object.assign(values, Object.fromEntries(useful)); applyRoadValues(x, values); } }, 'Use in road details: ' + useful.map(([k, v]) => k + '=' + v).join(', ')));
+  const p = rd.power || {}; const pw = [p.distribution_poles && 'power poles', p.overhead_low_voltage_lines && 'low-voltage overhead lines', p.transmission_towers && 'transmission towers', p.high_voltage_lines && 'high-voltage lines'].filter(Boolean);
+  if (pw.length) card.append(h('div', { class: 'small' }, h('b', {}, 'Power: '), pw.join(', '), '. The lines themselves are ways between poles; draw or check them in iD or JOSM.'));
+  if ((rd.barriers || []).length) card.append(h('div', { class: 'small' }, h('b', {}, 'Barriers: '), rd.barriers.map(b => `${b.type.replace(/_/g, ' ')} (${b.side})`).join(', ')));
+  if (rd.intersection && rd.intersection.visible) card.append(h('div', { class: 'small' }, h('b', {}, 'Intersection: '), `${rd.intersection.type}, ${rd.intersection.control}`));
+  why.forEach(w => card.append(h('div', { class: 'warn' }, w)));
+  if (rd.notes) card.append(h('div', { class: 'small muted' }, rd.notes));
+  const pmap = { street_lamp: 'street_lamp', power_pole: 'power_pole', transmission_tower: 'power_tower', speed_limit_sign: 'speed_sign', stop_sign: 'stop', give_way_sign: 'give_way', traffic_signals: 'traffic_signals', pedestrian_crossing: 'crossing', tree: 'tree', bus_stop: 'bus_stop', fire_hydrant: 'hydrant' };
+  for (const ob of R.objects || []) {
+    const o = OBS.get(cr.photos[ob.photo]); const preset = pmap[ob.type]; if (!o || !preset) continue;
+    const exists = o.anns.some(a => a.src === 'claude' && Math.abs(a.x - ob.x) < 0.03 && Math.abs(a.y - ob.y) < 0.03);
+    card.append(h('div', { class: 'row', style: 'gap:6px' }, h('span', { style: 'flex:1' }, PRESETS[preset].label + (ob.text ? ` "${ob.text}"` : '') + ` · photo ${ob.photo}`),
+      exists ? h('span', { class: 'pill' }, 'added') : h('button', { class: 'btn small', onclick: () => {
+        const a = { id: newId(), x: Math.min(1, Math.max(0, +ob.x)), y: Math.min(1, Math.max(0, +ob.y)), preset, values: preset === 'speed_sign' && /^\d+$/.test(ob.text || '') ? { maxspeed: ob.text } : {}, status: 'pending', src: 'claude' };
+        a.dist = tiltDistance(o, a) || 15; a.distSrc = 'tilt'; o.anns.push(a); resolveAnn(o, a); saveObs(o); toast('Added as a mark to review.'); renderRoad(); } }, 'Add'),
+      h('button', { class: 'btn small', onclick: () => openDetail(o.id) }, 'Photo')));
+  }
+  card.append(h('p', { class: 'muted small', style: 'margin:0' }, 'These are suggestions from an AI looking at your photos. Check each one against the photos before approving.'));
+  return card;
+}
+function applyRoadValues(x, values) {
+  const sheetMark = x.marks.find(m => m.a.sheet && m.a.status !== 'uploaded'); let a = sheetMark && sheetMark.a, owner = sheetMark && sheetMark.o;
+  if (!a) { owner = x.photos[Math.floor(x.photos.length / 2)]; a = { id: newId(), x: 0.5, y: 0.8, preset: 'road', wayId: x.id, lockWay: true, sheet: true, values: {}, status: 'pending' }; owner.anns.push(a); }
+  a.values = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== '' && v != null)); a.status = 'pending'; a.src = 'camera'; resolveAnn(owner, a); saveObs(owner);
+  toast('Added to the road details. Check and approve the road change.'); renderRoad();
+}
+function addFromCluster(c, preset) {
+  const o = c.best.o; const a = { id: newId(), x: c.best.x, y: c.best.y, preset, values: {}, status: 'pending', lat: c.lat, lon: c.lon, manual: true, dist: c.best.dist, src: 'camera' };
+  o.anns.push(a); resolveAnn(o, a); saveObs(o); toast('Added as a mark to review.'); renderRoad();
 }
 function fieldInput(f, id, val, cur) {
   if (f.t === 'num') return h('input', { id, type: 'number', inputmode: 'decimal', step: f.step || 'any', min: 0, placeholder: cur != null ? 'keep ' + cur : 'unknown, leave blank', value: val });
@@ -2093,6 +2486,7 @@ async function doUpload(btn, comment, out) {
   try {
     const c = await compile(true);
     const tags = { created_by: APP, comment, source: 'survey', 'survey:date': new Date().toISOString().slice(0, 10) };
+    if (c.used.some(({ a }) => a.src)) tags['source'] = 'survey;camera';
     const body = `<osm><changeset>${Object.entries(tags).map(([k, v]) => `<tag k="${esc(k)}" v="${esc(v)}"/>`).join('')}</changeset></osm>`;
     cs = (await (await api('/api/0.6/changeset/create', { method: 'PUT', headers: { 'Content-Type': 'text/xml' }, body })).text()).trim();
     await api(`/api/0.6/changeset/${cs}/upload`, { method: 'POST', headers: { 'Content-Type': 'text/xml' }, body: oscXml(c, cs) });
@@ -2176,6 +2570,18 @@ function renderSettings() {
   v.append(num('targetPasses', 'Passes wanted per direction', 1, 'first pass + confirmations'));
   const lv = h('input', { type: 'checkbox', id: 'set-live', checked: S.liveOverlay }); lv.onchange = () => { S.liveOverlay = lv.checked; liveOn = lv.checked; saveSettings(); };
   v.append(h('label', { class: 'toggle', for: 'set-live' }, lv, 'Draw OSM roads over the live camera'));
+  v.append(h('h3', {}, 'Vision'));
+  const chk = (k, label) => { const i = h('input', { type: 'checkbox', id: 'set-' + k, checked: !!S[k] }); i.onchange = () => { S[k] = i.checked; saveSettings(); }; return h('label', { class: 'toggle', for: 'set-' + k, style: 'margin-bottom:10px' }, i, label); };
+  v.append(chk('autoAlign', 'Line photos up automatically when they are analysed'));
+  v.append(chk('analyseAfterDrive', 'Analyse a drive as soon as it ends (heavy on a phone; better on a computer)'));
+  v.append(h('p', { class: 'muted small', style: 'margin:0 0 6px' }, 'Measured widths scale with the camera height: measure your mount height with a tape and set it under Drive mode above.'));
+  v.append(h('b', { class: 'small' }, 'Claude vision (optional)'));
+  v.append(h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, 'For what the on-device model cannot tell: kerb type, lane use, sign text, intersection type, barriers, and ordinary power poles versus high-voltage towers. Uses your own Anthropic API key and is billed to your account; a few photos are sent per road you ask about. Photos go to Anthropic only when you press Ask Claude. The key is stored on this device only and is never exported.'));
+  const key = h('input', { id: 'set-ckey', type: 'password', value: S.claudeKey, placeholder: 'sk-ant-…', autocomplete: 'off' }); key.onchange = () => { S.claudeKey = key.value.trim(); saveSettings(); };
+  v.append(h('div', { class: 'field' }, h('label', { for: 'set-ckey' }, 'Anthropic API key'), h('span', { class: 'cur' }, 'console.anthropic.com'), key));
+  const mdl = h('select', { id: 'set-cmodel' }, [['claude-haiku-5-5', 'Claude Haiku 5.5 (fast, cheapest)'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 (more careful)']].map(([v2, l]) => h('option', { value: v2, selected: S.claudeModel === v2 }, l))); mdl.onchange = () => { S.claudeModel = mdl.value; saveSettings(); };
+  v.append(h('div', { class: 'field' }, h('label', { for: 'set-cmodel' }, 'Model'), mdl));
+  v.append(num('claudePhotos', 'Photos sent per road', 1, 'about 1,200 input tokens each'));
   v.append(h('h3', {}, 'Review on another device'));
   v.append(h('p', { class: 'muted small', style: 'margin:0 0 8px' }, 'Export from the phone, then open LocalityMap on an iPad or computer and import the zip (AirDrop, Files, email or a USB cable all work). Review and upload there, or export the reviews back: a reviews-only export is small and merges into the phone\'s copy, newest change winning.'));
   const imp = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ''; if (f) importSurvey(f).catch(err => toast('Import failed: ' + err.message, 7000)); } });

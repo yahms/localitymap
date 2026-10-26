@@ -1,0 +1,1081 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d6b4e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>LocalityMap</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+/* Field tool: header / one scrolling view / bottom tab bar. Tags are shown in mono, the way OSM editors show them. */
+:root{
+  --bg:#eef2f0; --surface:#ffffff; --sunk:#e2e9e5; --fg:#13201a; --muted:#56665e; --line:#cdd8d2;
+  --accent:#0d6b4e; --accent-fg:#ffffff; --mark:#f2a100; --add:#1d8656; --mod:#a86400; --bad:#b3261e; --info:#1f5fae;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#0e1411; --surface:#16201b; --sunk:#1d2923; --fg:#e4ece8; --muted:#94a59c; --line:#2b3832;
+    --accent:#3fbf8d; --accent-fg:#06281b; --mark:#ffb51f; --add:#4cc489; --mod:#e0a040; --bad:#ff7a6e; --info:#7fb0ff; color-scheme:dark}
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--font);display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+header.top{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 8px) max(14px,env(safe-area-inset-right,0px)) 8px max(14px,env(safe-area-inset-left,0px));background:var(--surface);border-bottom:1px solid var(--line)}
+header.top h1{font-size:17px;margin:0;letter-spacing:.01em}
+header.top .srv{margin-left:auto;font-size:12px;padding:3px 8px;border-radius:99px;background:var(--sunk);color:var(--muted)}
+header.top .srv.dev{background:var(--mod);color:#fff}
+main{overflow:auto;position:relative;-webkit-overflow-scrolling:touch}
+.view{padding:14px max(14px,env(safe-area-inset-right,0px)) 24px max(14px,env(safe-area-inset-left,0px));max-width:1100px;margin:0 auto}
+nav.tabs{display:grid;grid-template-columns:repeat(4,1fr);background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabs button{background:none;border:0;padding:9px 4px 8px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav.tabs button svg{width:22px;height:22px}
+nav.tabs button.on{color:var(--accent);font-weight:600}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 14px;min-height:42px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+.btn.danger{color:var(--bad)}
+.btn.small{min-height:34px;padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.45}
+.btn:focus-visible,.chip:focus-visible,nav.tabs button:focus-visible{outline:3px solid var(--info);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:13px}
+h2{font-size:20px;margin:4px 0 12px;text-wrap:balance}
+h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:18px 0 8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px}
+.stack{display:flex;flex-direction:column;gap:10px}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--sunk);color:var(--muted);white-space:nowrap}
+.pill.pending{background:color-mix(in srgb,var(--mark) 22%,transparent);color:var(--mod)}
+.pill.approved{background:color-mix(in srgb,var(--add) 20%,transparent);color:var(--add)}
+.pill.rejected{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.pill.uploaded{background:color-mix(in srgb,var(--info) 18%,transparent);color:var(--info)}
+.warn{border-left:3px solid var(--mod);padding:6px 10px;background:color-mix(in srgb,var(--mark) 12%,transparent);border-radius:6px;font-size:13px}
+.err{border-left:3px solid var(--bad);padding:6px 10px;background:color-mix(in srgb,var(--bad) 10%,transparent);border-radius:6px;font-size:13px}
+
+/* capture */
+#v-capture{padding:0;max-width:none;height:100%;position:relative;background:#000;color:#fff}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+.hud{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:flex-start;padding:12px max(14px,env(safe-area-inset-right,0px)) 12px max(14px,env(safe-area-inset-left,0px));gap:10px;pointer-events:none;background:linear-gradient(#000a,#0000)}
+.hud .big{font:600 34px/1 var(--mono);font-variant-numeric:tabular-nums}
+.hud .sub{font-size:13px;opacity:.85}
+.hud .gps{text-align:right}
+.hud .bad{color:#ffb4a8}
+.crosshair{position:absolute;left:50%;top:0;bottom:0;width:0;border-left:1px dashed #ffffff66;pointer-events:none}
+.capbar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-around;padding:16px max(14px,env(safe-area-inset-right,0px)) 18px max(14px,env(safe-area-inset-left,0px));background:linear-gradient(#0000,#000b)}
+.shutter{width:72px;height:72px;border-radius:50%;border:4px solid #fff;background:#ffffff33}
+.shutter:active{background:#fff}
+.capbar .btn{background:#ffffff22;border-color:#ffffff55;color:#fff}
+.start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center}
+.start p{max-width:36ch;opacity:.85;margin:0}
+
+/* surveys */
+.surveys{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.svy{display:grid;grid-template-columns:84px 1fr;gap:10px;align-items:center;cursor:pointer;text-align:left}
+.svy img{width:84px;height:84px;object-fit:cover;border-radius:10px;background:var(--sunk)}
+.svy .t{font-weight:600}
+.empty{padding:30px 10px;text-align:center}
+
+/* detail */
+.dhead{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.dhead .title{flex:1;min-width:0}
+.dhead .title b{display:block}
+.panes{display:grid;grid-template-columns:1fr;gap:12px}
+@media (min-width:820px){.panes{grid-template-columns:1fr 1fr}}
+.photo{position:relative;border-radius:12px;overflow:hidden;background:#000;line-height:0;touch-action:manipulation}
+.photo img{width:100%;height:auto;display:block}
+.photo svg{position:absolute;inset:0;width:100%;height:100%}
+#map{height:340px;border-radius:12px;border:1px solid var(--line);z-index:0}
+@media (min-width:820px){#map{height:100%;min-height:340px}}
+.headbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+.headbar .val{font:600 18px var(--mono);min-width:5.5ch;text-align:center;font-variant-numeric:tabular-nums}
+.chg{display:grid;gap:8px}
+.chg .top{display:flex;gap:8px;align-items:center}
+.num{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:600 13px var(--mono);background:var(--mark);color:#1b1300;flex:none}
+.chg .name{font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
+table.diff{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:13px}
+table.diff td{padding:3px 6px;border-top:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+table.diff td.k{color:var(--muted);width:38%}
+.old{color:var(--bad);text-decoration:line-through}
+.new{color:var(--add);font-weight:600}
+.none{color:var(--muted)}
+.toggle{display:flex;align-items:center;gap:6px;font-size:14px}
+
+/* sheet */
+dialog#sheet{border:0;padding:0;width:min(640px,100%);max-height:92vh;margin:auto auto 0;border-radius:18px 18px 0 0;background:var(--surface);color:var(--fg)}
+@media (min-width:700px){dialog#sheet{margin:auto;border-radius:18px}}
+dialog#sheet::backdrop{background:#0008}
+.sheet{padding:16px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 12px;font-size:14px;cursor:pointer}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.field{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center}
+.field label{font-size:14px}
+.field .cur{font:12px var(--mono);color:var(--muted);text-align:right}
+.field input,.field select,.field textarea{grid-column:1/-1;width:100%;padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--bg);min-height:42px}
+.field textarea{min-height:90px}
+input[type=range]{width:100%}
+.settings .field{margin-bottom:14px}
+.code{font:13px var(--mono);background:var(--sunk);padding:8px 10px;border-radius:8px;overflow-wrap:anywhere;user-select:all}
+#toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;max-width:min(92vw,520px);z-index:1000;font-size:14px;box-shadow:0 6px 24px #0004}
+.lf-cam{background:none;border:0}
+.lf-num{background:var(--mark);color:#1b1300;border:2px solid #fff;border-radius:50%;font:600 12px/20px var(--mono);text-align:center;box-shadow:0 1px 4px #0006}
+.lf-num.approved{background:var(--add);color:#fff}
+.lf-num.rejected{background:#888;color:#fff}
+.lf-num.uploaded{background:var(--info);color:#fff}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>LocalityMap</h1>
+  <span class="srv" id="srvBadge"></span>
+</header>
+<main id="main">
+  <section id="v-capture" class="view" hidden>
+    <video id="video" playsinline muted autoplay></video>
+    <div class="crosshair"></div>
+    <div class="hud">
+      <div><div class="big" id="hudHead">---°</div><div class="sub" id="hudHeadSub">compass off</div></div>
+      <div class="gps"><div class="big" id="hudAcc" style="font-size:22px">GPS</div><div class="sub" id="hudGpsSub">waiting</div></div>
+    </div>
+    <div class="start" id="startPane">
+      <h2 style="color:#fff">Survey a street</h2>
+      <p>Point the camera along what you want to map. LocalityMap records where you stand and which way the camera faces, so each mark on the photo becomes a position on the map.</p>
+      <button class="btn primary" id="btnStart">Start camera, compass and GPS</button>
+      <label class="btn" style="background:#ffffff22;border-color:#ffffff55;color:#fff">Import a photo<input type="file" accept="image/jpeg,image/*" id="importFile" hidden></label>
+    </div>
+    <div class="capbar" id="capBar" hidden>
+      <label class="btn">Import<input type="file" accept="image/jpeg,image/*" id="importFile2" hidden></label>
+      <button class="shutter" id="btnShoot" aria-label="Take survey photo"></button>
+      <button class="btn" id="btnStop">Stop</button>
+    </div>
+  </section>
+  <section id="v-surveys" class="view" hidden></section>
+  <section id="v-detail" class="view" hidden></section>
+  <section id="v-upload" class="view" hidden></section>
+  <section id="v-settings" class="view settings" hidden></section>
+</main>
+<nav class="tabs" id="tabs">
+  <button data-v="capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Capture</button>
+  <button data-v="surveys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>Surveys</button>
+  <button data-v="upload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v5h16v-5"/></svg>Upload</button>
+  <button data-v="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17m10-10 2.1-2.1"/></svg>Settings</button>
+</nav>
+<dialog id="sheet"></dialog>
+<div id="toast" hidden></div>
+
+<script>
+'use strict';
+const VERSION = '0.1.0';
+const APP = 'LocalityMap ' + VERSION;
+
+/* ---------- small helpers ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const h = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (k === 'class') e.className = v;
+    else if (k === 'html') e.innerHTML = v;
+    else if (k === 'value') e.value = v;
+    else e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const k of kids.flat()) { if (k == null || k === false) continue; e.append(k.nodeType ? k : document.createTextNode(String(k))); }
+  return e;
+};
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+const norm360 = a => ((a % 360) + 360) % 360;
+const card8 = d => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(norm360(d) / 45) % 8];
+const fmtM = m => m == null ? '?' : (m < 10 ? m.toFixed(1) : Math.round(m)) + ' m';
+let toastTimer;
+function toast(msg, ms = 3500) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms); }
+function loadLS(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } }
+function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+
+/* ---------- settings ---------- */
+const DEFAULTS = { server: 'prod', clientId: '', hfov: 66, camHeight: 1.5, declination: 0, signin: 'redirect' };
+let S = Object.assign({}, DEFAULTS, loadLS('gt.settings', {}));
+const SERVERS = {
+  prod: { label: 'OpenStreetMap', api: 'https://api.openstreetmap.org', web: 'https://www.openstreetmap.org' },
+  dev: { label: 'Dev sandbox', api: 'https://master.apis.dev.openstreetmap.org', web: 'https://master.apis.dev.openstreetmap.org' }
+};
+const srv = () => SERVERS[S.server];
+function saveSettings() { saveLS('gt.settings', S); updateBadge(); }
+function updateBadge() { const b = $('#srvBadge'); b.textContent = srv().label; b.classList.toggle('dev', S.server === 'dev'); }
+
+/* ---------- storage (IndexedDB keeps photos on the phone) ---------- */
+const store = (() => {
+  let p;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open('localitymap', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('obs', { keyPath: 'id' });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const tx = async (mode, fn) => { const d = await open(); return new Promise((res, rej) => { const t = d.transaction('obs', mode); const r = fn(t.objectStore('obs')); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); };
+  return { put: o => tx('readwrite', s => s.put(o)), all: () => tx('readonly', s => s.getAll()), del: id => tx('readwrite', s => s.delete(id)) };
+})();
+const OBS = new Map();
+const saveTimers = {};
+function saveObs(o) { clearTimeout(saveTimers[o.id]); saveTimers[o.id] = setTimeout(() => store.put(o).catch(e => toast('Could not save: ' + e.message)), 250); }
+const photoURLs = new Map();
+const photoURL = o => { if (!photoURLs.has(o.id)) photoURLs.set(o.id, URL.createObjectURL(o.photo)); return photoURLs.get(o.id); };
+
+/* ---------- presets: the tags BeamNG.Earth reads ---------- */
+const ROADS = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'service', 'living_street', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link', 'road', 'track'];
+const isRoad = t => ROADS.includes(t.highway);
+const YN = ['yes', 'no'];
+const PRESETS = {
+  road: { label: 'Road', group: 'fix', type: 'way', match: isRoad, fields: [
+    { k: 'lanes', label: 'Lanes (both directions)', t: 'num', step: 1 },
+    { k: 'width', label: 'Road width, kerb to kerb (m)', t: 'num', step: 0.1 },
+    { k: 'maxspeed', label: 'Speed limit (km/h)', t: 'num', step: 10 },
+    { k: 'surface', label: 'Surface', t: 'sel', opts: ['asphalt', 'concrete', 'chipseal', 'paving_stones', 'sett', 'compacted', 'gravel', 'unpaved', 'dirt'] },
+    { k: 'oneway', label: 'One way', t: 'sel', opts: ['yes', 'no', '-1'] },
+    { k: 'sidewalk', label: 'Footpaths', t: 'sel', opts: ['both', 'left', 'right', 'no', 'separate'] },
+    { k: 'lit', label: 'Street lighting', t: 'sel', opts: YN },
+    { k: 'lane_markings', label: 'Lane markings painted', t: 'sel', opts: YN },
+    { k: 'shoulder', label: 'Sealed shoulder', t: 'sel', opts: ['both', 'left', 'right', 'no'] }
+  ] },
+  building: { label: 'Building', group: 'fix', type: 'way', match: t => !!t.building, fields: [
+    { k: 'building:levels', label: 'Storeys above ground', t: 'num', step: 1 },
+    { k: 'height', label: 'Height to top of roof (m)', t: 'num', step: 0.5 },
+    { k: 'roof:shape', label: 'Roof shape', t: 'sel', opts: ['flat', 'gabled', 'hipped', 'skillion', 'half-hipped', 'pyramidal', 'gambrel', 'dome'] },
+    { k: 'roof:levels', label: 'Storeys inside roof', t: 'num', step: 1 },
+    { k: 'building:material', label: 'Wall material', t: 'sel', opts: ['brick', 'concrete', 'cement_block', 'plaster', 'wood', 'metal', 'glass', 'stone'] },
+    { k: 'roof:material', label: 'Roof material', t: 'sel', opts: ['roof_tiles', 'metal', 'concrete', 'asbestos', 'glass'] }
+  ] },
+  street_lamp: { label: 'Street light', group: 'add', type: 'node', tags: { highway: 'street_lamp' } },
+  traffic_signals: { label: 'Traffic signals', group: 'add', type: 'node', onWay: true, tags: { highway: 'traffic_signals' } },
+  stop: { label: 'Stop sign', group: 'add', type: 'node', onWay: true, autoDir: true, tags: { highway: 'stop' }, fields: [
+    { k: 'direction', label: 'Traffic it controls (along the OSM way)', t: 'sel', opts: ['forward', 'backward'] }] },
+  give_way: { label: 'Give way sign', group: 'add', type: 'node', onWay: true, autoDir: true, tags: { highway: 'give_way' }, fields: [
+    { k: 'direction', label: 'Traffic it controls (along the OSM way)', t: 'sel', opts: ['forward', 'backward'] }] },
+  crossing: { label: 'Pedestrian crossing', group: 'add', type: 'node', onWay: true, tags: { highway: 'crossing' }, fields: [
+    { k: 'crossing', label: 'Crossing type', t: 'sel', opts: ['traffic_signals', 'uncontrolled', 'unmarked'] },
+    { k: 'crossing_ref', label: 'Zebra stripes', t: 'sel', opts: ['zebra'] }
+  ] },
+  hump: { label: 'Speed hump', group: 'add', type: 'node', onWay: true, tags: { traffic_calming: 'hump' } },
+  power_pole: { label: 'Power pole', group: 'add', type: 'node', tags: { power: 'pole' } },
+  tree: { label: 'Tree', group: 'add', type: 'node', tags: { natural: 'tree' } },
+  note: { label: 'Note for other mappers', group: 'other', type: 'note' }
+};
+const GROUPS = { fix: 'Correct what is mapped', add: 'Add something missing', other: 'Something else' };
+
+/* ---------- sensors ---------- */
+const sensors = { heading: null, src: null, elev: null, samples: [], pos: null, started: false, stream: null, geoId: null };
+// Compass direction of the rear camera from W3C device orientation (alpha, beta, gamma, Earth frame).
+function backHeading(alpha, beta, gamma) {
+  const a = alpha * D2R, b = beta * D2R, g = gamma * D2R;
+  const east = -Math.cos(a) * Math.sin(g) - Math.sin(a) * Math.sin(b) * Math.cos(g);
+  const north = -Math.sin(a) * Math.sin(g) + Math.cos(a) * Math.sin(b) * Math.cos(g);
+  return norm360(Math.atan2(east, north) * R2D);
+}
+function onOrient(e) {
+  let hd = null, src = null;
+  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) { hd = e.webkitCompassHeading; src = 'compass (iOS)'; }
+  else if ((e.absolute || e.type === 'deviceorientationabsolute') && e.alpha != null) { hd = backHeading(e.alpha, e.beta, e.gamma); src = 'compass'; }
+  if (e.beta != null) { const B = e.beta * D2R, G = (e.gamma || 0) * D2R; sensors.elev = Math.asin(Math.max(-1, Math.min(1, -Math.cos(B) * Math.cos(G)))) * R2D; }
+  if (hd == null) return;
+  hd = norm360(hd + Number(S.declination || 0));
+  const now = performance.now();
+  sensors.samples.push({ t: now, h: hd });
+  while (sensors.samples.length && now - sensors.samples[0].t > 1200) sensors.samples.shift();
+  sensors.src = src;
+}
+function smoothHeading() {
+  const s = sensors.samples; if (!s.length) return null;
+  let x = 0, y = 0; for (const p of s) { x += Math.sin(p.h * D2R); y += Math.cos(p.h * D2R); }
+  const R = Math.hypot(x, y) / s.length;
+  return { h: norm360(Math.atan2(x, y) * R2D), spread: Math.sqrt(Math.max(0, -2 * Math.log(Math.max(R, 1e-6)))) * R2D };
+}
+async function startSensors() {
+  try { if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted') toast('Compass access was refused. You can still set the heading by hand when reviewing.'); } } catch {}
+  if ('ondeviceorientationabsolute' in window) addEventListener('deviceorientationabsolute', onOrient); else addEventListener('deviceorientation', onOrient);
+  if ('geolocation' in navigator) {
+    sensors.geoId = navigator.geolocation.watchPosition(
+      p => { sensors.pos = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, t: Date.now() }; },
+      e => toast('Location unavailable: ' + e.message), { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+  }
+  await startCamera();
+  sensors.started = true;
+  $('#startPane').hidden = true; $('#capBar').hidden = false;
+  hudLoop();
+}
+async function startCamera() {
+  if (sensors.stream) return;
+  try {
+    sensors.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    $('#video').srcObject = sensors.stream;
+  } catch (e) { toast('Camera unavailable (' + e.message + '). Use Import instead.'); }
+}
+function stopCamera() { if (sensors.stream) { sensors.stream.getTracks().forEach(t => t.stop()); sensors.stream = null; } }
+function stopAll() {
+  stopCamera(); removeEventListener('deviceorientationabsolute', onOrient); removeEventListener('deviceorientation', onOrient);
+  if (sensors.geoId != null) navigator.geolocation.clearWatch(sensors.geoId);
+  sensors.started = false; sensors.samples = []; $('#startPane').hidden = false; $('#capBar').hidden = true;
+}
+let hudTimer;
+function hudLoop() {
+  clearInterval(hudTimer);
+  hudTimer = setInterval(() => {
+    if (view !== 'capture') return;
+    const sh = smoothHeading();
+    $('#hudHead').textContent = sh ? Math.round(sh.h) + '° ' + card8(sh.h) : '---°';
+    $('#hudHeadSub').textContent = sh ? (sh.spread > 4 ? 'hold still…' : 'steady') + ' · tilt ' + Math.round(sensors.elev ?? 0) + '°' : 'no compass reading';
+    $('#hudHeadSub').className = 'sub' + (sh && sh.spread > 4 ? ' bad' : '');
+    const p = sensors.pos;
+    $('#hudAcc').textContent = p ? '±' + Math.round(p.acc) + ' m' : 'GPS';
+    $('#hudGpsSub').textContent = p ? (p.acc > 15 ? 'weak fix, wait' : 'good fix') : 'waiting';
+    $('#hudGpsSub').className = 'sub' + (p && p.acc > 15 ? ' bad' : '');
+  }, 200);
+}
+
+/* ---------- capture & import ---------- */
+function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+async function shoot() {
+  const v = $('#video');
+  if (!v.videoWidth) return toast('Camera not ready yet.');
+  const p = sensors.pos; const sh = smoothHeading();
+  if (!p) return toast('No GPS fix yet. Wait a moment.');
+  const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  const o = {
+    id: newId(), created: new Date().toISOString(), photo: blob, img: { w: c.width, h: c.height }, hfovLong: Number(S.hfov),
+    cam: { lat: p.lat, lon: p.lon, acc: p.acc, heading: sh ? sh.h : 0, headingSrc: sh ? sensors.src : 'unknown', spread: sh ? sh.spread : null, elev: sensors.elev, height: Number(S.camHeight) },
+    anns: [], osm: null
+  };
+  if (navigator.vibrate) navigator.vibrate(30);
+  await addObs(o);
+  toast('Saved. Tap the photo to mark what is wrong or missing.');
+}
+async function importPhoto(file) {
+  if (!file) return;
+  const ex = await readExif(file).catch(() => ({}));
+  const bmp = await createImageBitmap(file);
+  const c = document.createElement('canvas'); const scale = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  let lat = ex.lat, lon = ex.lon, acc = ex.lat != null ? 10 : null, posSrc = 'photo';
+  if (lat == null && sensors.pos) { lat = sensors.pos.lat; lon = sensors.pos.lon; acc = sensors.pos.acc; posSrc = 'current location'; }
+  const last = [...OBS.values()].sort((a, b) => b.created.localeCompare(a.created))[0];
+  if (lat == null && last) { lat = last.cam.lat; lon = last.cam.lon; acc = null; posSrc = 'unknown'; }
+  if (lat == null) { lat = -31.9523; lon = 115.8613; acc = null; posSrc = 'unknown'; }
+  const o = {
+    id: newId(), created: ex.date || new Date().toISOString(), photo: blob, img: { w: c.width, h: c.height }, hfovLong: Number(S.hfov),
+    cam: { lat, lon, acc, posSrc, heading: ex.dir ?? 0, headingSrc: ex.dir != null ? 'photo (' + (ex.dirRef === 'M' ? 'magnetic' : 'true') + ')' : 'unknown', elev: null, height: Number(S.camHeight) },
+    anns: [], osm: null
+  };
+  if (ex.dir != null && ex.dirRef === 'M') o.cam.heading = norm360(ex.dir + Number(S.declination || 0));
+  await addObs(o);
+  if (posSrc === 'unknown' || ex.dir == null) toast('This photo has no ' + (posSrc === 'unknown' ? 'location' : 'heading') + '. Drag the camera on the map and turn it with the heading buttons.', 6000);
+}
+async function addObs(o) {
+  OBS.set(o.id, o); await store.put(o);
+  fetchContext(o).catch(e => toast('Could not load OSM data: ' + e.message));
+  openDetail(o.id);
+}
+
+/* minimal EXIF reader: GPS position, image direction, date */
+async function readExif(file) {
+  const buf = await file.slice(0, 256 * 1024).arrayBuffer(); const v = new DataView(buf);
+  if (v.byteLength < 4 || v.getUint16(0) !== 0xFFD8) return {};
+  let o = 2;
+  while (o < v.byteLength - 10) {
+    const m = v.getUint16(o), len = v.getUint16(o + 2);
+    if (m === 0xFFE1 && v.getUint32(o + 4) === 0x45786966) return parseTiff(v, o + 10);
+    if ((m & 0xFF00) !== 0xFF00) break; o += 2 + len;
+  }
+  return {};
+}
+function parseTiff(v, t) {
+  const le = v.getUint16(t) === 0x4949;
+  const u16 = o => v.getUint16(t + o, le), u32 = o => v.getUint32(t + o, le);
+  const ifd = off => { const n = u16(off), out = {}; for (let i = 0; i < n; i++) { const e = off + 2 + i * 12; out[u16(e)] = { type: u16(e + 2), count: u32(e + 4), voff: e + 8 }; } return out; };
+  const size = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+  const val = ent => {
+    if (!ent) return null; const { type, count, voff } = ent; const off = (size[type] || 1) * count > 4 ? u32(voff) : voff;
+    if (type === 5) { const a = []; for (let i = 0; i < count; i++) a.push(u32(off + i * 8) / u32(off + i * 8 + 4)); return a; }
+    if (type === 2) { let s = ''; for (let i = 0; i < count - 1; i++) s += String.fromCharCode(v.getUint8(t + off + i)); return s; }
+    if (type === 3) return u16(off); if (type === 4) return u32(off); return v.getUint8(t + off);
+  };
+  const out = {}; const i0 = ifd(u32(4));
+  if (i0[0x8769]) { const ex = ifd(val(i0[0x8769])); const d = val(ex[0x9003]); if (d) { const m = d.match(/(\d+):(\d+):(\d+) (\d+):(\d+):(\d+)/); if (m) out.date = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).toISOString(); } }
+  if (i0[0x8825]) {
+    const g = ifd(val(i0[0x8825])); const dms = a => a && a[0] + a[1] / 60 + a[2] / 3600;
+    const lat = dms(val(g[2])), lon = dms(val(g[4]));
+    if (lat != null && lon != null && (lat || lon)) { out.lat = val(g[1]) === 'S' ? -lat : lat; out.lon = val(g[3]) === 'W' ? -lon : lon; }
+    const dir = val(g[0x11]); if (dir) { out.dir = dir[0]; out.dirRef = val(g[0x10]) || 'T'; }
+  }
+  return out;
+}
+
+/* ---------- OSM context around the camera ---------- */
+async function fetchContext(o, rerender = true) {
+  const { lat, lon } = o.cam; const dLat = 0.0016, dLon = dLat / Math.cos(lat * D2R);
+  const bbox = [lon - dLon, lat - dLat, lon + dLon, lat + dLat].map(x => x.toFixed(6)).join(',');
+  const r = await fetch(`${srv().api}/api/0.6/map.json?bbox=${bbox}`);
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 120));
+  const j = await r.json(); const nodes = {}, ways = {}, used = new Set();
+  for (const el of j.elements) if (el.type === 'way') { ways[el.id] = { tags: el.tags || {}, nds: el.nodes, v: el.version }; el.nodes.forEach(n => used.add(n)); }
+  for (const el of j.elements) if (el.type === 'node' && (used.has(el.id) || el.tags)) nodes[el.id] = { lat: el.lat, lon: el.lon, tags: el.tags || {}, v: el.version };
+  o.osm = { nodes, ways, server: S.server, at: new Date().toISOString(), lat, lon };
+  o.anns.forEach(a => resolveAnn(o, a));
+  saveObs(o);
+  if (rerender && current && current.id === o.id) { drawOverlay(); drawMap(); renderChanges(); }
+}
+
+/* ---------- geometry ---------- */
+function mkProj(lat0, lon0) { const kx = Math.cos(lat0 * D2R) * 111320, ky = 110574; return { fwd: (lat, lon) => [(lon - lon0) * kx, (lat - lat0) * ky], inv: (e, n) => ({ lat: lat0 + n / ky, lon: lon0 + e / kx }) }; }
+function camFov(o) {
+  const { w, h } = o.img; const tl = Math.tan(o.hfovLong * D2R / 2);
+  const th = w >= h ? tl : tl * w / h, tv = h >= w ? tl : tl * h / w;
+  return { th, tv, hfov: 2 * Math.atan(th) * R2D, vfov: 2 * Math.atan(tv) * R2D };
+}
+const annBearing = (o, a) => norm360(o.cam.heading + Math.atan((a.x - 0.5) * 2 * camFov(o).th) * R2D);
+function tiltDistance(o, a) {
+  if (o.cam.elev == null) return null;
+  const dep = -(o.cam.elev + Math.atan((0.5 - a.y) * 2 * camFov(o).tv) * R2D);
+  if (dep < 1.5) return null;
+  return Math.min(200, o.cam.height / Math.tan(dep * D2R));
+}
+function raySeg(b, A, B) {
+  const dx = Math.sin(b * D2R), dy = Math.cos(b * D2R), ex = B[0] - A[0], ey = B[1] - A[1];
+  const den = dx * ey - dy * ex; if (Math.abs(den) < 1e-9) return null;
+  const t = (A[0] * ey - A[1] * ex) / den, u = (A[0] * dy - A[1] * dx) / den;
+  return t > 0 && u >= 0 && u <= 1 ? { t, u } : null;
+}
+function nearestOnSeg(P, A, B) {
+  const ex = B[0] - A[0], ey = B[1] - A[1], L = ex * ex + ey * ey;
+  const u = L ? Math.max(0, Math.min(1, ((P[0] - A[0]) * ex + (P[1] - A[1]) * ey) / L)) : 0;
+  const pt = [A[0] + u * ex, A[1] + u * ey]; return { u, pt, d: Math.hypot(P[0] - pt[0], P[1] - pt[1]) };
+}
+function wayPts(o, w, pr) { return w.nds.map(id => o.osm.nodes[id]).map(n => n ? pr.fwd(n.lat, n.lon) : null); }
+const wayLabel = (id, w) => { const t = w.tags; const nm = t.name || t.ref || t['addr:street'] && (t['addr:housenumber'] ? t['addr:housenumber'] + ' ' + t['addr:street'] : null); return (nm ? nm + ' · ' : '') + (t.highway ? t.highway : t.building ? 'building' : 'way') + ' ' + id; };
+
+function candidates(o, a) {
+  const P = PRESETS[a.preset]; if (!o.osm || !P) return [];
+  const match = P.type === 'way' ? P.match : isRoad;
+  const pr = mkProj(o.cam.lat, o.cam.lon); const b = annBearing(o, a);
+  const est = a.dist ? [Math.sin(b * D2R) * a.dist, Math.cos(b * D2R) * a.dist] : null;
+  const out = [];
+  for (const [id, w] of Object.entries(o.osm.ways)) {
+    if (!match(w.tags)) continue;
+    const pts = wayPts(o, w, pr); let hit = null, perp = Infinity;
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (!pts[i] || !pts[i + 1]) continue;
+      const r = raySeg(b, pts[i], pts[i + 1]); if (r && r.t < 250 && (!hit || r.t < hit)) hit = r.t;
+      if (est) perp = Math.min(perp, nearestOnSeg(est, pts[i], pts[i + 1]).d);
+    }
+    if (hit == null && perp > 40) continue;
+    out.push({ id, label: wayLabel(id, w), hit, score: hit != null ? hit : 1000 + perp });
+  }
+  return out.sort((x, y) => x.score - y.score).slice(0, 12);
+}
+function snapOnWay(o, wayId, b, dist, fixedPt) {
+  const w = o.osm.ways[wayId]; const pr = mkProj(o.cam.lat, o.cam.lon); const pts = wayPts(o, w, pr);
+  let best = null;
+  if (!fixedPt) for (let i = 0; i < pts.length - 1; i++) { if (!pts[i] || !pts[i + 1]) continue; const r = raySeg(b, pts[i], pts[i + 1]); if (r && (!best || r.t < best.t)) best = { i, u: r.u, t: r.t }; }
+  if (!best) {
+    const P = fixedPt || [Math.sin(b * D2R) * (dist || 15), Math.cos(b * D2R) * (dist || 15)];
+    let m = null; for (let i = 0; i < pts.length - 1; i++) { if (!pts[i] || !pts[i + 1]) continue; const r = nearestOnSeg(P, pts[i], pts[i + 1]); if (!m || r.d < m.d) m = { i, u: r.u, d: r.d }; }
+    if (!m) return null; best = m;
+  }
+  const A = pts[best.i], B = pts[best.i + 1]; const pt = [A[0] + (B[0] - A[0]) * best.u, A[1] + (B[1] - A[1]) * best.u];
+  return { ll: pr.inv(pt[0], pt[1]), seg: { from: w.nds[best.i], to: w.nds[best.i + 1], u: best.u }, dist: Math.hypot(pt[0], pt[1]) };
+}
+// Place each mark: pick its OSM target and, for new points, its position.
+function resolveAnn(o, a) {
+  const P = PRESETS[a.preset]; if (!P) return;
+  const pr = mkProj(o.cam.lat, o.cam.lon); const b = annBearing(o, a); a.bearing = b;
+  if (P.type === 'way' || P.onWay) {
+    if (o.osm && (!a.wayId || !o.osm.ways[a.wayId])) a.wayId = (candidates(o, a)[0] || {}).id || null;
+  }
+  if (P.type === 'way') return;
+  if (P.onWay && a.wayId && o.osm && o.osm.ways[a.wayId]) {
+    const fixed = a.manual && a.lat != null ? pr.fwd(a.lat, a.lon) : null;
+    const s = snapOnWay(o, a.wayId, b, a.dist, fixed);
+    if (s) { a.lat = s.ll.lat; a.lon = s.ll.lon; a.seg = s.seg; if (!a.manual) a.dist = s.dist; return; }
+  }
+  a.seg = null;
+  if (a.manual && a.lat != null) return;
+  const d = a.dist || 15; const ll = pr.inv(Math.sin(b * D2R) * d, Math.cos(b * D2R) * d); a.lat = ll.lat; a.lon = ll.lon;
+}
+// Proposed tag changes for one mark, against what OSM has now.
+function annDiff(o, a) {
+  const P = PRESETS[a.preset]; if (!P) return [];
+  if (P.type === 'way') {
+    const w = o.osm && o.osm.ways[a.wayId]; const cur = w ? w.tags : {};
+    return Object.entries(a.values || {}).filter(([k, v]) => v !== '' && v != null && String(v) !== String(cur[k] ?? '')).map(([k, v]) => ({ k, from: cur[k], to: String(v) }));
+  }
+  if (P.type === 'node') return Object.entries(Object.assign({}, P.tags, P.autoDir ? { direction: autoDirection(o, a) } : {}, a.values || {})).filter(([, v]) => v !== '' && v != null).map(([k, v]) => ({ k, from: undefined, to: String(v) }));
+  return [];
+}
+// You see a sign's face when looking the way its traffic drives, so compare the camera heading with the way's direction.
+function autoDirection(o, a) {
+  if (!o.osm || !a.seg) return '';
+  const A = o.osm.nodes[a.seg.from], B = o.osm.nodes[a.seg.to]; if (!A || !B) return '';
+  const pr = mkProj(A.lat, A.lon); const [e, n] = pr.fwd(B.lat, B.lon);
+  const diff = Math.abs(((norm360(Math.atan2(e, n) * R2D) - o.cam.heading) + 540) % 360 - 180);
+  return diff < 90 ? 'forward' : 'backward';
+}
+function annWarnings(o, a) {
+  const P = PRESETS[a.preset], out = []; if (!P) return out;
+  if (!o.osm) { out.push('OSM data for this spot has not loaded yet.'); return out; }
+  if (o.osm.server !== S.server) out.push('This survey was loaded from ' + SERVERS[o.osm.server].label + ', but you are set to ' + srv().label + '. Reload the OSM data before uploading.');
+  if ((P.type === 'way' || P.onWay) && !a.wayId) out.push('No matching ' + (P.type === 'way' ? P.label.toLowerCase() : 'road') + ' found in OSM along this direction.');
+  if (P.type === 'way' && a.wayId && !annDiff(o, a).length) out.push('Nothing to change: every value matches OSM already.');
+  if (P.type === 'node' && a.lat != null) {
+    const pr = mkProj(a.lat, a.lon); const [k, v] = Object.entries(P.tags)[0];
+    for (const [id, n] of Object.entries(o.osm.nodes)) {
+      if (n.tags[k] !== v) continue; const d = Math.hypot(...pr.fwd(n.lat, n.lon));
+      if (d < (P.onWay ? 15 : 8)) { out.push(`OSM already has ${k}=${v} ${fmtM(d)} away (node ${id}). This may be a duplicate.`); break; }
+    }
+  }
+  if (P.onWay && a.seg && a.lat != null) {
+    const pr = mkProj(a.lat, a.lon);
+    for (const id of [a.seg.from, a.seg.to]) { const n = o.osm.nodes[id]; if (n && Math.hypot(...pr.fwd(n.lat, n.lon)) < 1.5) { out.push('This sits on an existing vertex' + (o.osm.nodes[id].tags.highway ? '' : ' (often a junction)') + '. Drag it a few metres along the road to where the sign or line actually is.'); break; } }
+  }
+  if (P.autoDir && !(a.values || {}).direction && a.seg) out.push('Direction set to ' + autoDirection(o, a) + ' because the sign faced the camera. Change it if you photographed the back of the sign.');
+  if (P.type !== 'way' && a.dist > 60 && !a.manual) out.push('Placed ' + fmtM(a.dist) + ' away. Positions this far out depend heavily on the heading; check it on the map.');
+  return out;
+}
+
+/* ---------- navigation ---------- */
+let view = 'surveys', current = null;
+function go(v) {
+  view = v;
+  for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'v-' + v;
+  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.v === v || (v === 'detail' && b.dataset.v === 'surveys'));
+  if (v === 'capture') { if (sensors.started) startCamera(); } else stopCamera();
+  if (v !== 'detail' && MAP) { MAP.remove(); MAP = null; }
+  if (v === 'surveys') renderSurveys();
+  if (v === 'upload') renderUpload();
+  if (v === 'settings') renderSettings();
+  $('#main').scrollTop = 0;
+}
+
+/* ---------- surveys list ---------- */
+function counts(o) { const c = { pending: 0, approved: 0, rejected: 0, uploaded: 0 }; o.anns.forEach(a => c[a.status] = (c[a.status] || 0) + 1); return c; }
+function placeName(o) {
+  if (!o.osm) return 'OSM data not loaded';
+  const c = candidates(o, { preset: 'road', x: 0.5, y: 0.6, dist: 20 })[0];
+  return c ? c.label.replace(/ (\w+) \d+$/, ' · $1') : 'No road in view';
+}
+function renderSurveys() {
+  const v = $('#v-surveys'); v.innerHTML = '';
+  v.append(h('h2', {}, 'Surveys'));
+  const list = [...OBS.values()].sort((a, b) => b.created.localeCompare(a.created));
+  if (!list.length) { v.append(h('div', { class: 'card empty' }, h('p', {}, 'No surveys yet.'), h('button', { class: 'btn primary', onclick: () => go('capture') }, 'Take the first photo'))); return; }
+  const g = h('div', { class: 'surveys' });
+  for (const o of list) {
+    const c = counts(o);
+    g.append(h('button', { class: 'card svy', onclick: () => openDetail(o.id) },
+      h('img', { src: photoURL(o), alt: '' }),
+      h('div', { style: 'min-width:0' },
+        h('div', { class: 't' }, new Date(o.created).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })),
+        h('div', { class: 'muted', style: 'font-size:13px' }, placeName(o), ' · ', Math.round(o.cam.heading) + '° ' + card8(o.cam.heading)),
+        h('div', { class: 'row', style: 'margin-top:6px;gap:4px' },
+          o.anns.length ? null : h('span', { class: 'pill' }, 'no marks'),
+          c.pending ? h('span', { class: 'pill pending' }, c.pending + ' to review') : null,
+          c.approved ? h('span', { class: 'pill approved' }, c.approved + ' approved') : null,
+          c.uploaded ? h('span', { class: 'pill uploaded' }, c.uploaded + ' uploaded') : null))));
+  }
+  v.append(g);
+}
+
+/* ---------- detail: annotate & review ---------- */
+let MAP = null, mapLayer = null, showOSM = true;
+function openDetail(id) { current = OBS.get(id); go('detail'); renderDetail(); }
+function renderDetail() {
+  const o = current, v = $('#v-detail'); v.innerHTML = '';
+  let delArmed = false;
+  const del = h('button', { class: 'btn small danger', onclick: async () => {
+    if (!delArmed) { delArmed = true; del.textContent = 'Tap again to delete'; setTimeout(() => { delArmed = false; del.textContent = 'Delete'; }, 3000); return; }
+    OBS.delete(o.id); await store.del(o.id); current = null; go('surveys');
+  } }, 'Delete');
+  v.append(h('div', { class: 'dhead' },
+    h('button', { class: 'btn small', onclick: () => go('surveys') }, '← Surveys'),
+    h('div', { class: 'title' }, h('b', {}, new Date(o.created).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })), h('span', { class: 'muted', style: 'font-size:13px', id: 'camInfo' })),
+    del));
+  const photo = h('div', { class: 'photo' }, h('img', { src: photoURL(o), alt: 'Survey photo' }));
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.id = 'ov'; svg.setAttribute('preserveAspectRatio', 'none');
+  svg.addEventListener('click', onPhotoTap); photo.append(svg);
+  v.append(h('div', { class: 'panes' }, photo, h('div', { id: 'map' })));
+  const hv = h('span', { class: 'val', id: 'headVal' });
+  const nudge = d => h('button', { class: 'btn small', onclick: () => { o.cam.heading = norm360(o.cam.heading + d); o.cam.headingSrc = 'adjusted'; recompute(); } }, (d > 0 ? '+' : '−') + Math.abs(d) + '°');
+  v.append(h('div', { class: 'headbar' },
+    h('span', { class: 'muted', style: 'font-size:13px' }, 'Heading'), nudge(-5), nudge(-1), hv, nudge(1), nudge(5),
+    h('label', { class: 'toggle', style: 'margin-left:auto' }, h('input', { type: 'checkbox', id: 'osmToggle', checked: showOSM, onchange: e => { showOSM = e.target.checked; drawOverlay(); } }), 'OSM on photo')));
+  v.append(h('p', { class: 'muted', style: 'font-size:13px;margin:0 0 6px' }, 'Tap the photo to mark something. Line up the OSM road lines with the real kerbs using the heading buttons; that also corrects every mark\'s position. Drag the camera or a point on the map to fine-tune.'));
+  v.append(h('div', { id: 'osmState' }));
+  v.append(h('h3', {}, 'Changes'), h('div', { class: 'stack', id: 'changes' }));
+  const img = photo.querySelector('img');
+  const ready = () => { drawOverlay(); };
+  img.complete ? ready() : img.addEventListener('load', ready);
+  setTimeout(() => { buildMap(); renderChanges(); updateCamInfo(); }, 0);
+}
+function updateCamInfo() {
+  const o = current; if (!o) return;
+  $('#headVal').textContent = Math.round(o.cam.heading) + '°';
+  $('#camInfo').textContent = ` · GPS ${o.cam.acc ? '±' + Math.round(o.cam.acc) + ' m' : (o.cam.posSrc === 'unknown' ? 'position not set' : 'set by hand')} · heading from ${o.cam.headingSrc}`;
+  const st = $('#osmState'); st.innerHTML = '';
+  if (!o.osm) st.append(h('div', { class: 'warn row' }, 'OSM data for this spot is not loaded.', h('button', { class: 'btn small', onclick: () => fetchContext(o).then(updateCamInfo).catch(e => toast(e.message)) }, 'Load it')));
+  else if (o.osm.server !== S.server) st.append(h('div', { class: 'warn row' }, 'Loaded from ' + SERVERS[o.osm.server].label + '.', h('button', { class: 'btn small', onclick: () => fetchContext(o).then(updateCamInfo).catch(e => toast(e.message)) }, 'Reload from ' + srv().label)));
+}
+function recompute() { const o = current; o.anns.forEach(a => resolveAnn(o, a)); saveObs(o); drawOverlay(); drawMap(); renderChanges(); updateCamInfo(); }
+
+/* pinhole projection of map features into the photo (flat ground assumed) */
+function camBasis(o) {
+  const H = o.cam.heading * D2R, P = (o.cam.elev || 0) * D2R;
+  return { f: [Math.sin(H) * Math.cos(P), Math.cos(H) * Math.cos(P), Math.sin(P)], r: [Math.cos(H), -Math.sin(H), 0], u: [-Math.sin(H) * Math.sin(P), -Math.cos(H) * Math.sin(P), Math.cos(P)], fov: camFov(o) };
+}
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const toCam = (B, p) => [dot(p, B.r), dot(p, B.u), dot(p, B.f)];
+const camToImg = (o, B, c) => [(0.5 + c[0] / c[2] / (2 * B.fov.th)) * o.img.w, (0.5 - c[1] / c[2] / (2 * B.fov.tv)) * o.img.h];
+function projSeg(o, B, A, C) {
+  let a = toCam(B, A), b = toCam(B, C); const N = 1;
+  if (a[2] < N && b[2] < N) return null;
+  if (a[2] < N) { const t = (N - a[2]) / (b[2] - a[2]); a = a.map((x, i) => x + (b[i] - x) * t); }
+  else if (b[2] < N) { const t = (N - b[2]) / (a[2] - b[2]); b = b.map((x, i) => x + (a[i] - x) * t); }
+  return [camToImg(o, B, a), camToImg(o, B, b)];
+}
+function drawOverlay() {
+  const o = current, svg = $('#ov'); if (!svg) return;
+  const { w, h: H } = o.img; svg.setAttribute('viewBox', `0 0 ${w} ${H}`);
+  const sw = Math.max(2, w / 320); let s = '';
+  if (showOSM && o.osm) {
+    const pr = mkProj(o.cam.lat, o.cam.lon), B = camBasis(o), z0 = -o.cam.height;
+    const labels = [];
+    for (const [id, way] of Object.entries(o.osm.ways)) {
+      const road = isRoad(way.tags), bld = !!way.tags.building; if (!road && !bld) continue;
+      const pts = wayPts(o, way, pr); let d = '', best = null;
+      const bh = bld ? (parseFloat(way.tags.height) || (parseFloat(way.tags['building:levels']) * 3.2) || null) : null; let dTop = '';
+      for (let i = 0; i < pts.length - 1; i++) {
+        const A = pts[i], C = pts[i + 1]; if (!A || !C) continue;
+        if (Math.hypot(...A) > 220 && Math.hypot(...C) > 220) continue;
+        const seg = projSeg(o, B, [A[0], A[1], z0], [C[0], C[1], z0]); if (!seg) continue;
+        d += `M${seg[0][0].toFixed(1)} ${seg[0][1].toFixed(1)}L${seg[1][0].toFixed(1)} ${seg[1][1].toFixed(1)}`;
+        if (bh) { const t = projSeg(o, B, [A[0], A[1], z0 + bh], [C[0], C[1], z0 + bh]); if (t) dTop += `M${t[0][0].toFixed(1)} ${t[0][1].toFixed(1)}L${t[1][0].toFixed(1)} ${t[1][1].toFixed(1)}`; }
+        if (road) { const mx = (seg[0][0] + seg[1][0]) / 2, my = (seg[0][1] + seg[1][1]) / 2; const dist = Math.hypot((A[0] + C[0]) / 2, (A[1] + C[1]) / 2);
+          if (mx > w * 0.05 && mx < w * 0.95 && my > H * 0.1 && my < H * 0.98 && (!best || dist < best.dist)) best = { x: mx, y: my, dist }; }
+      }
+      if (!d) continue;
+      const hl = o.anns.some(a => a.wayId === id);
+      if (road) s += `<path d="${d}" stroke="${hl ? '#ffd23f' : '#38e0a8'}" stroke-width="${sw * (hl ? 2 : 1.4)}" fill="none" stroke-linecap="round" opacity=".9"/>`;
+      else s += `<path d="${d}" stroke="#ff8fd0" stroke-width="${sw}" fill="none" opacity=".75"/>` + (dTop ? `<path d="${dTop}" stroke="#ff8fd0" stroke-width="${sw}" stroke-dasharray="${sw * 3} ${sw * 2}" fill="none" opacity=".75"/>` : '');
+      if (road && best) { const t = way.tags; labels.push({ ...best, text: [t.name || t.highway, t.lanes && 'lanes=' + t.lanes, t.width && 'width=' + t.width, t.maxspeed && t.maxspeed + ' km/h'].filter(Boolean).join(' · ') }); }
+    }
+    const fs = Math.max(12, w / 55);
+    labels.sort((a, b) => a.dist - b.dist).slice(0, 4).forEach(l => {
+      s += `<text x="${l.x.toFixed(0)}" y="${l.y.toFixed(0)}" font-size="${fs}" font-family="ui-monospace,Menlo,monospace" fill="#fff" stroke="#000" stroke-width="${fs / 5}" paint-order="stroke" text-anchor="middle">${esc(l.text)}</text>`;
+    });
+    // horizon line helps judge the tilt reading
+    if (o.cam.elev != null) { const y = (0.5 - Math.tan(-o.cam.elev * D2R) / (2 * B.fov.tv)) * H; if (y > 0 && y < H) s += `<line x1="0" x2="${w}" y1="${y}" y2="${y}" stroke="#fff" stroke-opacity=".35" stroke-dasharray="${sw * 4} ${sw * 4}" stroke-width="${sw * .7}"/>`; }
+  }
+  const r = Math.max(14, w / 45);
+  const col = { pending: '#f2a100', approved: '#1d8656', rejected: '#888888', uploaded: '#1f5fae' };
+  o.anns.forEach((a, i) => {
+    const x = a.x * w, y = a.y * H;
+    s += `<line x1="${x}" y1="${y - r * 1.8}" x2="${x}" y2="${y + r * 1.8}" stroke="#fff" stroke-width="${sw * .6}" opacity=".7"/>`;
+    s += `<circle cx="${x}" cy="${y}" r="${r}" fill="${col[a.status] || '#f2a100'}" stroke="#fff" stroke-width="${sw}"/>`;
+    s += `<text x="${x}" y="${y + r * .38}" font-size="${r * 1.05}" font-weight="700" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" fill="${a.status === 'pending' ? '#1b1300' : '#fff'}">${i + 1}</text>`;
+  });
+  svg.innerHTML = s;
+}
+function onPhotoTap(ev) {
+  const o = current, rc = ev.currentTarget.getBoundingClientRect();
+  const x = (ev.clientX - rc.left) / rc.width, y = (ev.clientY - rc.top) / rc.height;
+  const hitR = 26 / rc.width;
+  const near = o.anns.find(a => Math.hypot((a.x - x), (a.y - y) * rc.height / rc.width) < hitR);
+  if (near) return openSheet(near, false);
+  const a = { id: newId(), x, y, preset: null, values: {}, status: 'pending' };
+  a.dist = tiltDistance(o, a); a.distSrc = a.dist ? 'tilt' : null; if (!a.dist) a.dist = 15;
+  openSheet(a, true);
+}
+
+/* ---------- map ---------- */
+function buildMap() {
+  const o = current; if (MAP) MAP.remove();
+  MAP = L.map('map', { zoomControl: true }).setView([o.cam.lat, o.cam.lon], 19);
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(MAP);
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19, attribution: 'Imagery © Esri' });
+  L.control.layers({ 'OSM map': osm, 'Esri imagery': sat }).addTo(MAP);
+  mapLayer = L.layerGroup().addTo(MAP);
+  drawMap();
+}
+function drawMap() {
+  const o = current; if (!MAP || !o) return; mapLayer.clearLayers();
+  const pr = mkProj(o.cam.lat, o.cam.lon), fov = camFov(o);
+  const cone = [[o.cam.lat, o.cam.lon]];
+  for (let k = -1; k <= 1; k += 0.25) { const b = (o.cam.heading + k * fov.hfov / 2) * D2R; const ll = pr.inv(Math.sin(b) * 70, Math.cos(b) * 70); cone.push([ll.lat, ll.lon]); }
+  L.polygon(cone, { color: '#0d6b4e', weight: 1, fillOpacity: 0.12, interactive: false }).addTo(mapLayer);
+  if (o.cam.acc) L.circle([o.cam.lat, o.cam.lon], { radius: o.cam.acc, color: '#1f5fae', weight: 1, fillOpacity: 0.08, interactive: false }).addTo(mapLayer);
+  if (o.osm) for (const id of new Set(o.anns.map(a => a.wayId).filter(Boolean))) {
+    const w = o.osm.ways[id]; if (!w) continue;
+    L.polyline(w.nds.map(n => o.osm.nodes[n]).filter(Boolean).map(n => [n.lat, n.lon]), { color: '#f2a100', weight: 7, opacity: 0.7 }).bindTooltip(wayLabel(id, w)).addTo(mapLayer);
+  }
+  o.anns.forEach((a, i) => {
+    const b = (a.bearing ?? annBearing(o, a)) * D2R;
+    const P = PRESETS[a.preset];
+    const end = a.lat != null && P && P.type !== 'way' ? [a.lat, a.lon] : (() => { const ll = pr.inv(Math.sin(b) * 80, Math.cos(b) * 80); return [ll.lat, ll.lon]; })();
+    L.polyline([[o.cam.lat, o.cam.lon], end], { color: '#f2a100', weight: 2, dashArray: '5 5', interactive: false }).addTo(mapLayer);
+    if (P && P.type !== 'way' && a.lat != null) {
+      const m = L.marker([a.lat, a.lon], { draggable: a.status !== 'uploaded', icon: L.divIcon({ className: 'lf-num ' + a.status, html: String(i + 1), iconSize: [24, 24] }) }).addTo(mapLayer);
+      m.on('dragend', () => { const ll = m.getLatLng(); a.lat = ll.lat; a.lon = ll.lng; a.manual = true; a.dist = Math.hypot(...pr.fwd(a.lat, a.lon)); recompute(); });
+    }
+  });
+  const arrow = `<svg width="34" height="34" viewBox="-17 -17 34 34" style="transform:rotate(${o.cam.heading}deg)"><circle r="9" fill="#1f5fae" stroke="#fff" stroke-width="3"/><path d="M0 -16 L6 -7 L-6 -7 Z" fill="#1f5fae" stroke="#fff" stroke-width="1.5"/></svg>`;
+  const cam = L.marker([o.cam.lat, o.cam.lon], { draggable: true, icon: L.divIcon({ className: 'lf-cam', html: arrow, iconSize: [34, 34] }), zIndexOffset: 1000 }).bindTooltip('You were here. Drag to correct.').addTo(mapLayer);
+  cam.on('dragend', () => {
+    const ll = cam.getLatLng(); const moved = Math.hypot(...pr.fwd(ll.lat, ll.lng));
+    o.cam.lat = ll.lat; o.cam.lon = ll.lng; o.cam.acc = null; o.cam.posSrc = 'set by hand';
+    if (o.osm && Math.hypot(...mkProj(o.osm.lat, o.osm.lon).fwd(ll.lat, ll.lng)) > 90) fetchContext(o).catch(e => toast(e.message));
+    if (moved > 0) recompute();
+  });
+}
+
+/* ---------- change list ---------- */
+function renderChanges() {
+  const o = current, box = $('#changes'); if (!box) return; box.innerHTML = '';
+  if (!o.anns.length) { box.append(h('p', { class: 'muted' }, 'No marks yet. Tap the photo on the thing that is wrong or missing in OSM.')); return; }
+  o.anns.forEach((a, i) => {
+    const P = PRESETS[a.preset] || { label: '?' }; const w = o.osm && a.wayId ? o.osm.ways[a.wayId] : null;
+    let title = P.label;
+    if (P.type === 'way') title += ' · ' + (w ? wayLabel(a.wayId, w) : 'no match');
+    else if (P.type === 'node') title = 'New ' + P.label.toLowerCase() + (P.onWay && w ? ' on ' + wayLabel(a.wayId, w) : '');
+    const c = h('div', { class: 'card chg' });
+    c.append(h('div', { class: 'top' }, h('span', { class: 'num' }, i + 1), h('span', { class: 'name' }, title), h('span', { class: 'pill ' + a.status }, a.status === 'pending' ? 'to review' : a.status)));
+    const diff = annDiff(o, a);
+    if (diff.length) {
+      const t = h('table', { class: 'diff' });
+      diff.forEach(d => t.append(h('tr', {}, h('td', { class: 'k' }, d.k), h('td', {}, d.from != null ? h('span', { class: 'old' }, d.from) : h('span', { class: 'none' }, P.type === 'node' ? '+' : '(none)'), ' → ', h('span', { class: 'new' }, d.to)))));
+      c.append(t);
+    }
+    if (P.type !== 'way' && a.lat != null) c.append(h('div', { class: 'muted mono' }, `${a.lat.toFixed(6)}, ${a.lon.toFixed(6)} · ${fmtM(a.dist)} at ${Math.round(a.bearing ?? 0)}°${a.manual ? ' · placed by hand' : a.distSrc === 'tilt' ? ' · distance from tilt' : ''}`));
+    if (P.type === 'note') c.append(h('div', {}, a.text || h('span', { class: 'muted' }, '(empty note)')));
+    annWarnings(o, a).forEach(x => c.append(h('div', { class: 'warn' }, x)));
+    if (a.status === 'uploaded') c.append(h('div', { class: 'muted' }, a.result || 'Uploaded'));
+    else {
+      const set = s => { a.status = s; saveObs(o); drawOverlay(); drawMap(); renderChanges(); };
+      c.append(h('div', { class: 'row' },
+        h('button', { class: 'btn small', onclick: () => openSheet(a, false) }, 'Edit'),
+        a.status !== 'rejected' ? h('button', { class: 'btn small danger', onclick: () => set('rejected') }, 'Reject') : null,
+        a.status !== 'approved' ? h('button', { class: 'btn small primary', onclick: () => set('approved') }, 'Approve') : h('button', { class: 'btn small', onclick: () => set('pending') }, 'Undo approval')));
+    }
+    box.append(c);
+  });
+}
+
+/* ---------- annotation sheet ---------- */
+function openSheet(a, isNew) {
+  const o = current, d = $('#sheet');
+  const draft = JSON.parse(JSON.stringify(a));
+  d.innerHTML = '';
+  const body = h('div', { class: 'stack' });
+  const save = h('button', { class: 'btn primary', type: 'button', onclick: () => {
+    if (!draft.preset) return toast('Choose what this mark is.');
+    Object.assign(a, draft);
+    if (a.status === 'uploaded') return d.close();
+    a.status = 'pending';
+    if (isNew) o.anns.push(a);
+    resolveAnn(o, a); saveObs(o); d.close(); drawOverlay(); drawMap(); renderChanges();
+  } }, 'Save mark');
+  const remove = isNew ? null : h('button', { class: 'btn danger', type: 'button', onclick: () => { o.anns.splice(o.anns.indexOf(a), 1); saveObs(o); d.close(); drawOverlay(); drawMap(); renderChanges(); } }, 'Remove mark');
+  d.append(h('div', { class: 'sheet' },
+    h('div', { class: 'row' }, h('b', { style: 'flex:1' }, (isNew ? 'New mark' : 'Mark ' + (o.anns.indexOf(a) + 1)) + ' · looking ' + Math.round(annBearing(o, draft)) + '° ' + card8(annBearing(o, draft))), h('button', { class: 'btn small', type: 'button', onclick: () => d.close() }, 'Cancel')),
+    body, h('div', { class: 'row', style: 'justify-content:flex-end' }, remove, save)));
+  sheetBody(o, draft, body);
+  d.showModal();
+}
+function sheetBody(o, draft, body) {
+  body.innerHTML = '';
+  const locked = draft.status === 'uploaded';
+  for (const [g, gl] of Object.entries(GROUPS)) {
+    body.append(h('div', { class: 'muted', style: 'font-size:13px' }, gl));
+    const chips = h('div', { class: 'chips' });
+    for (const [id, P] of Object.entries(PRESETS)) if (P.group === g)
+      chips.append(h('button', { type: 'button', class: 'chip' + (draft.preset === id ? ' on' : ''), disabled: locked, onclick: () => { draft.preset = id; draft.values = {}; draft.wayId = null; draft.manual = false; sheetBody(o, draft, body); } }, P.label));
+    body.append(chips);
+  }
+  const P = PRESETS[draft.preset]; if (!P) return;
+  let target = null;
+  if (P.type === 'way' || P.onWay) {
+    const cands = candidates(o, draft);
+    if (!draft.wayId && cands[0]) draft.wayId = cands[0].id;
+    if (!o.osm) body.append(h('div', { class: 'warn' }, 'OSM data is still loading for this spot. Save now and pick the target when it arrives.'));
+    else if (!cands.length) body.append(h('div', { class: 'warn' }, `No ${P.type === 'way' ? P.label.toLowerCase() : 'road'} in OSM along this direction. If the heading is off, fix it first; if it's missing from OSM entirely, use a note.`));
+    else {
+      const sel = h('select', { id: 'f-target', onchange: e => { draft.wayId = e.target.value; sheetBody(o, draft, body); } },
+        cands.map(c => h('option', { value: c.id, selected: c.id === draft.wayId }, c.label + (c.hit != null ? ` (${fmtM(c.hit)} ahead)` : ' (near)'))));
+      body.append(h('div', { class: 'field' }, h('label', { for: 'f-target' }, P.type === 'way' ? 'Which ' + P.label.toLowerCase() + ' in OSM' : 'Road it sits on'), sel));
+      target = o.osm.ways[draft.wayId];
+    }
+  }
+  if ((P.type === 'node' && !P.onWay) || P.type === 'note' || (P.onWay && !target)) {
+    const tilt = tiltDistance(o, draft);
+    const num = h('input', { id: 'f-dist', type: 'number', inputmode: 'decimal', min: 1, max: 250, step: 0.5, value: (draft.dist || 15).toFixed(1) });
+    const rng = h('input', { type: 'range', min: 1, max: 120, step: 0.5, value: Math.min(120, draft.dist || 15), 'aria-label': 'Distance' });
+    rng.oninput = () => { draft.dist = +rng.value; num.value = rng.value; draft.distSrc = 'manual'; draft.manual = false; };
+    num.oninput = () => { draft.dist = +num.value || 15; rng.value = Math.min(120, draft.dist); draft.distSrc = 'manual'; draft.manual = false; };
+    body.append(h('div', { class: 'field' }, h('label', { for: 'f-dist' }, 'Distance from you (m)'), h('span', { class: 'cur' }, tilt ? 'tilt says ' + fmtM(tilt) : ''), num, rng));
+    if (tilt) body.append(h('p', { class: 'muted', style: 'font-size:13px;margin:0' }, 'Tilt estimate assumes you tapped where the object meets the ground and the ground is level.'));
+  }
+  for (const f of P.fields || []) {
+    const cur = target ? target.tags[f.k] : undefined; const id = 'f-' + f.k.replace(/[^a-z0-9]/gi, '_');
+    const val = draft.values[f.k] ?? '';
+    let inp;
+    if (f.t === 'num') inp = h('input', { id, type: 'number', inputmode: 'decimal', step: f.step || 'any', min: 0, placeholder: cur != null ? 'keep ' + cur : 'unknown, leave blank', value: val });
+    else inp = h('select', { id }, h('option', { value: '' }, cur != null ? 'keep ' + cur : 'leave unset'), f.opts.map(op => h('option', { value: op, selected: op === val }, op)));
+    inp.addEventListener('input', () => { draft.values[f.k] = inp.value; });
+    inp.addEventListener('change', () => { draft.values[f.k] = inp.value; });
+    body.append(h('div', { class: 'field' }, h('label', { for: id }, f.label), h('span', { class: 'cur' }, P.type === 'way' ? (cur != null ? f.k + '=' + cur : f.k + ' not set') : f.k), inp));
+  }
+  if (P.type === 'note') {
+    const ta = h('textarea', { id: 'f-note', placeholder: 'e.g. Road was widened to 4 lanes in 2026; median added. Surveyed on site.' }, draft.text || '');
+    ta.oninput = () => draft.text = ta.value;
+    body.append(h('div', { class: 'field' }, h('label', { for: 'f-note' }, 'Note text (public)'), ta));
+  }
+}
+
+/* ---------- auth (OAuth 2 with PKCE, no server needed) ---------- */
+const b64url = u8 => btoa(String.fromCharCode(...u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const redirectUri = () => S.signin === 'oob' ? 'urn:ietf:wg:oauth:2.0:oob' : location.origin + location.pathname;
+const tokenKey = () => 'gt.token.' + S.server;
+const getToken = () => loadLS(tokenKey(), null);
+async function signIn() {
+  if (!S.clientId) { toast('Add your OSM app\'s client ID in Settings first.'); return go('settings'); }
+  const ver = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const chal = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ver))));
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  saveLS('gt.pkce', { ver, state, server: S.server });
+  const url = `${srv().web}/oauth2/authorize?` + new URLSearchParams({ response_type: 'code', client_id: S.clientId, redirect_uri: redirectUri(), scope: 'read_prefs write_api write_notes', code_challenge: chal, code_challenge_method: 'S256', state });
+  if (S.signin === 'oob') { window.open(url, '_blank'); renderUpload(true); } else location.href = url;
+}
+async function exchangeCode(code) {
+  const p = loadLS('gt.pkce', null); if (!p) throw new Error('Sign-in session expired. Start again.');
+  const r = await fetch(`${SERVERS[p.server].web}/oauth2/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri(), client_id: S.clientId, code_verifier: p.ver }) });
+  if (!r.ok) throw new Error('Token request failed: ' + r.status + ' ' + (await r.text()).slice(0, 160));
+  const j = await r.json(); S.server = p.server; saveSettings(); saveLS(tokenKey(), j.access_token); localStorage.removeItem('gt.pkce');
+  await loadUser();
+}
+async function handleOAuthReturn() {
+  const q = new URLSearchParams(location.search); if (!q.has('code') && !q.has('error')) return false;
+  history.replaceState(null, '', location.pathname);
+  if (q.has('error')) { toast('Sign-in cancelled: ' + q.get('error')); return true; }
+  const p = loadLS('gt.pkce', null);
+  if (!p || p.state !== q.get('state')) { toast('Sign-in did not match a request from this app. Try again.'); return true; }
+  try { await exchangeCode(q.get('code')); toast('Signed in.'); } catch (e) { toast(e.message, 7000); }
+  return true;
+}
+let USER = null;
+async function loadUser() {
+  const t = getToken(); USER = null; if (!t) return;
+  try { const r = await fetch(srv().api + '/api/0.6/user/details.json', { headers: { Authorization: 'Bearer ' + t } }); if (r.status === 401) { localStorage.removeItem(tokenKey()); return; } USER = (await r.json()).user; } catch {}
+}
+async function api(path, opt = {}) {
+  const t = getToken(); if (!t) throw new Error('Not signed in.');
+  const r = await fetch(srv().api + path, { ...opt, headers: { ...(opt.headers || {}), Authorization: 'Bearer ' + t } });
+  if (!r.ok) throw new Error(`${opt.method || 'GET'} ${path.split('?')[0]} failed: ${r.status} ${(await r.text()).slice(0, 200)}`);
+  return r;
+}
+
+/* ---------- compile approved marks into an osmChange ---------- */
+function approved() {
+  const out = [];
+  for (const o of OBS.values()) o.anns.forEach(a => { if (a.status === 'approved') out.push({ o, a }); });
+  return out;
+}
+async function compile(online) {
+  const items = approved(); const errors = [];
+  const tagEdits = {}, inserts = {}, creates = [], notes = [], used = [];
+  let tmp = -1;
+  for (const { o, a } of items) {
+    const P = PRESETS[a.preset];
+    if (!o.osm || o.osm.server !== S.server) { errors.push(`Skipped a ${P.label.toLowerCase()}: its OSM data is from another server or not loaded.`); continue; }
+    if (P.type === 'way') {
+      if (!a.wayId) { errors.push(`Skipped ${P.label.toLowerCase()} edit: no target.`); continue; }
+      const diff = annDiff(o, a); if (!diff.length) continue;
+      tagEdits[a.wayId] = Object.assign(tagEdits[a.wayId] || {}, Object.fromEntries(diff.map(d => [d.k, d.to])));
+      used.push({ o, a });
+    } else if (P.type === 'node') {
+      const id = tmp--; creates.push({ id, lat: a.lat, lon: a.lon, tags: Object.fromEntries(annDiff(o, a).map(d => [d.k, d.to])), label: P.label });
+      if (P.onWay && a.wayId && a.seg) (inserts[a.wayId] = inserts[a.wayId] || []).push({ ...a.seg, id });
+      used.push({ o, a });
+    } else if (P.type === 'note') { if ((a.text || '').trim()) notes.push({ o, a }); }
+  }
+  const ids = [...new Set([...Object.keys(tagEdits), ...Object.keys(inserts)])];
+  const fresh = {};
+  if (ids.length) {
+    if (online) {
+      for (let i = 0; i < ids.length; i += 100) {
+        const r = await fetch(`${srv().api}/api/0.6/ways.json?ways=${ids.slice(i, i + 100).join(',')}`);
+        if (!r.ok) throw new Error('Could not fetch current versions: ' + r.status);
+        for (const el of (await r.json()).elements) fresh[el.id] = { tags: el.tags || {}, nds: el.nodes, v: el.version };
+      }
+    } else for (const { o } of items) for (const id of ids) if (o.osm && o.osm.ways[id] && !fresh[id]) fresh[id] = JSON.parse(JSON.stringify(o.osm.ways[id]));
+  }
+  const modifies = [];
+  for (const id of ids) {
+    const w = fresh[id]; if (!w) { errors.push(`Way ${id} no longer exists; its changes were skipped.`); continue; }
+    const tags = Object.assign({}, w.tags, tagEdits[id] || {}); let nds = w.nds.slice();
+    const bySeg = {};
+    for (const ins of inserts[id] || []) (bySeg[ins.from + '_' + ins.to] = bySeg[ins.from + '_' + ins.to] || []).push(ins);
+    for (const group of Object.values(bySeg)) {
+      const { from, to } = group[0]; let i = -1, rev = false;
+      for (let k = 0; k < nds.length - 1; k++) { if (nds[k] === from && nds[k + 1] === to) { i = k; break; } if (nds[k] === to && nds[k + 1] === from) { i = k; rev = true; break; } }
+      if (i < 0) { errors.push(`Way ${id} changed shape since the survey; ${group.length} point(s) were added unattached.`); continue; }
+      group.sort((x, y) => rev ? y.u - x.u : x.u - y.u);
+      nds.splice(i + 1, 0, ...group.map(g => g.id));
+    }
+    modifies.push({ id, v: w.v, tags, nds });
+  }
+  const tally = {}; creates.forEach(c => tally[c.label] = (tally[c.label] || 0) + 1);
+  const edited = { road: 0, building: 0 }; const keys = new Set();
+  for (const id of Object.keys(tagEdits)) { const w = fresh[id]; if (w && isRoad(w.tags)) edited.road++; else edited.building++; Object.keys(tagEdits[id]).forEach(k => keys.add(k)); }
+  const parts = [];
+  if (creates.length) parts.push('added ' + Object.entries(tally).map(([k, n]) => n + ' ' + k.toLowerCase() + (n > 1 ? 's' : '')).join(', '));
+  if (edited.road || edited.building) parts.push('updated ' + [edited.road && edited.road + ' road' + (edited.road > 1 ? 's' : ''), edited.building && edited.building + ' building' + (edited.building > 1 ? 's' : '')].filter(Boolean).join(' and ') + ' (' + [...keys].join(', ') + ')');
+  return { creates, modifies, notes, used, errors, summary: parts.length ? 'Ground survey: ' + parts.join('; ') : '' };
+}
+function oscXml(c, cs) {
+  const csAttr = cs ? ` changeset="${cs}"` : '';
+  const tags = t => Object.entries(t).map(([k, v]) => `<tag k="${esc(k)}" v="${esc(v)}"/>`).join('');
+  let x = `<?xml version="1.0" encoding="UTF-8"?>\n<osmChange version="0.6" generator="${esc(APP)}">\n<create>\n`;
+  for (const n of c.creates) x += `<node id="${n.id}" lat="${n.lat.toFixed(7)}" lon="${n.lon.toFixed(7)}" version="0"${csAttr}>${tags(n.tags)}</node>\n`;
+  x += '</create>\n<modify>\n';
+  for (const w of c.modifies) x += `<way id="${w.id}" version="${w.v}"${csAttr}>${w.nds.map(n => `<nd ref="${n}"/>`).join('')}${tags(w.tags)}</way>\n`;
+  return x + '</modify>\n</osmChange>\n';
+}
+
+/* ---------- upload screen ---------- */
+let busy = false;
+async function renderUpload(showCode) {
+  const v = $('#v-upload'); v.innerHTML = '';
+  v.append(h('h2', {}, 'Upload to ' + srv().label));
+  if (getToken() && !USER) await loadUser();
+  const acct = h('div', { class: 'card row' });
+  if (USER) acct.append(h('span', { style: 'flex:1' }, 'Signed in as ', h('b', {}, USER.display_name)), h('button', { class: 'btn small', onclick: () => { localStorage.removeItem(tokenKey()); USER = null; renderUpload(); } }, 'Sign out'));
+  else acct.append(h('span', { style: 'flex:1' }, 'Sign in with your OSM account to upload.'), h('button', { class: 'btn primary', onclick: signIn }, 'Sign in'));
+  v.append(acct);
+  if (showCode || (S.signin === 'oob' && loadLS('gt.pkce', null) && !USER)) {
+    const inp = h('input', { id: 'f-code', placeholder: 'Paste the code OSM showed you' });
+    v.append(h('div', { class: 'card stack', style: 'margin-top:10px' }, h('div', { class: 'field' }, h('label', { for: 'f-code' }, 'Authorization code'), inp),
+      h('button', { class: 'btn primary', onclick: async () => { try { await exchangeCode(inp.value.trim()); toast('Signed in.'); renderUpload(); } catch (e) { toast(e.message, 7000); } } }, 'Finish sign-in')));
+  }
+  const items = approved();
+  const pend = [...OBS.values()].reduce((n, o) => n + o.anns.filter(a => a.status === 'pending').length, 0);
+  v.append(h('h3', {}, 'Ready to send'));
+  if (!items.length) { v.append(h('p', { class: 'muted' }, pend ? `Nothing approved yet. ${pend} mark(s) are waiting for review in Surveys.` : 'Nothing approved yet. Approve marks in Surveys first.')); return; }
+  let c;
+  try { c = await compile(navigator.onLine); } catch (e) { v.append(h('div', { class: 'err' }, e.message)); return; }
+  const list = h('div', { class: 'card stack' });
+  c.creates.forEach(n => list.append(h('div', { class: 'mono' }, h('span', { class: 'new' }, '+ node '), Object.entries(n.tags).map(([k, x]) => k + '=' + x).join(' '), h('span', { class: 'muted' }, ` @ ${n.lat.toFixed(5)},${n.lon.toFixed(5)}`))));
+  c.modifies.forEach(w => { list.append(h('div', { class: 'mono' }, h('span', { class: 'new', style: 'color:var(--mod)' }, '~ way ' + w.id + ' '), w.tags.name || w.tags.highway || 'building', ' (v' + w.v + ')')); });
+  c.notes.forEach(({ a }) => list.append(h('div', { class: 'mono' }, h('span', { class: 'new', style: 'color:var(--info)' }, '! note '), (a.text || '').slice(0, 80))));
+  v.append(list);
+  c.errors.forEach(e => v.append(h('div', { class: 'warn', style: 'margin-top:8px' }, e)));
+  const comment = h('textarea', { id: 'f-comment', style: 'min-height:70px' }, c.summary);
+  v.append(h('div', { class: 'field', style: 'margin-top:12px' }, h('label', { for: 'f-comment' }, 'Changeset comment (what and why, visible to everyone)'), comment));
+  v.append(h('p', { class: 'muted', style: 'font-size:13px' }, 'Tagged source=survey with today\'s date. Your photos stay on this phone.'));
+  if (S.server === 'prod') v.append(h('div', { class: 'warn' }, 'This writes to the live OpenStreetMap database under your name. Switch to the dev sandbox in Settings to rehearse.'));
+  const out = h('div', { class: 'stack', style: 'margin-top:10px' });
+  const hasEdits = c.creates.length || c.modifies.length;
+  v.append(h('div', { class: 'row', style: 'margin-top:12px' },
+    hasEdits ? h('button', { class: 'btn primary', disabled: !USER, onclick: e => doUpload(e.target, comment.value.trim(), out) }, `Upload ${c.creates.length + c.modifies.length} change${c.creates.length + c.modifies.length > 1 ? 's' : ''}`) : null,
+    c.notes.length ? h('button', { class: 'btn', disabled: !USER, onclick: e => postNotes(e.target, out) }, `Post ${c.notes.length} note${c.notes.length > 1 ? 's' : ''}`) : null,
+    hasEdits ? h('button', { class: 'btn', onclick: () => exportOsc(c) }, 'Export .osc for JOSM') : null), out);
+}
+async function doUpload(btn, comment, out) {
+  if (busy) return; if (!comment) return toast('Write a changeset comment first.');
+  busy = true; btn.disabled = true; btn.textContent = 'Uploading…'; let cs = null;
+  try {
+    const c = await compile(true);
+    if (c.errors.length) out.append(...c.errors.map(e => h('div', { class: 'warn' }, e)));
+    const tags = { created_by: APP, comment, source: 'survey', 'survey:date': new Date().toISOString().slice(0, 10) };
+    const body = `<osm><changeset>${Object.entries(tags).map(([k, v]) => `<tag k="${esc(k)}" v="${esc(v)}"/>`).join('')}</changeset></osm>`;
+    cs = (await (await api('/api/0.6/changeset/create', { method: 'PUT', headers: { 'Content-Type': 'text/xml' }, body })).text()).trim();
+    await api(`/api/0.6/changeset/${cs}/upload`, { method: 'POST', headers: { 'Content-Type': 'text/xml' }, body: oscXml(c, cs) });
+    await api(`/api/0.6/changeset/${cs}/close`, { method: 'PUT' });
+    const link = `${srv().web}/changeset/${cs}`;
+    for (const { o, a } of c.used) { a.status = 'uploaded'; a.result = 'In changeset ' + cs; saveObs(o); }
+    out.append(h('div', { class: 'card' }, 'Uploaded as changeset ', h('a', { href: link, target: '_blank', rel: 'noopener' }, cs), '. BeamNG.Earth will pick it up once its map sources refresh.'));
+    btn.textContent = 'Done';
+  } catch (e) {
+    out.append(h('div', { class: 'err' }, e.message + (e.message.includes('409') ? ' Someone edited this way since you loaded it; reload the survey\'s OSM data and try again.' : '')));
+    if (cs) api(`/api/0.6/changeset/${cs}/close`, { method: 'PUT' }).catch(() => {});
+    btn.disabled = false; btn.textContent = 'Try again';
+  } finally { busy = false; }
+}
+async function postNotes(btn, out) {
+  if (busy) return; busy = true; btn.disabled = true;
+  try {
+    const c = await compile(true);
+    for (const { o, a } of c.notes) {
+      const text = a.text.trim() + `\n\n(Surveyed on the ground ${o.created.slice(0, 10)}, looking ${Math.round(a.bearing)}° from ${o.cam.lat.toFixed(6)},${o.cam.lon.toFixed(6)}.)`;
+      const r = await api('/api/0.6/notes.json?' + new URLSearchParams({ lat: a.lat.toFixed(6), lon: a.lon.toFixed(6), text }), { method: 'POST' });
+      const j = await r.json(); a.status = 'uploaded'; a.result = 'Note ' + j.properties.id; saveObs(o);
+      out.append(h('div', { class: 'card' }, 'Posted ', h('a', { href: `${srv().web}/note/${j.properties.id}`, target: '_blank', rel: 'noopener' }, 'note ' + j.properties.id)));
+    }
+    btn.textContent = 'Posted';
+  } catch (e) { out.append(h('div', { class: 'err' }, e.message)); btn.disabled = false; } finally { busy = false; }
+}
+async function exportOsc(c) {
+  const name = `localitymap-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.osc`;
+  const file = new File([oscXml(c)], name, { type: 'application/xml' });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  const a = h('a', { href: URL.createObjectURL(file), download: name }); document.body.append(a); a.click(); a.remove();
+}
+
+/* ---------- settings ---------- */
+function renderSettings() {
+  const v = $('#v-settings'); v.innerHTML = '';
+  v.append(h('h2', {}, 'Settings'));
+  const num = (k, label, step, hint) => { const id = 'set-' + k; const i = h('input', { id, type: 'number', inputmode: 'decimal', step, value: S[k] }); i.onchange = () => { S[k] = Number(i.value); saveSettings(); }; return h('div', { class: 'field' }, h('label', { for: id }, label), h('span', { class: 'cur' }, hint || ''), i); };
+  const sel = (k, label, opts) => { const id = 'set-' + k; const s = h('select', { id }, Object.entries(opts).map(([val, l]) => h('option', { value: val, selected: S[k] === val }, l))); s.onchange = () => { S[k] = s.value; saveSettings(); USER = null; renderSettings(); }; return h('div', { class: 'field' }, h('label', { for: id }, label), s); };
+  v.append(h('h3', {}, 'OpenStreetMap account'));
+  v.append(sel('server', 'Server', { prod: 'OpenStreetMap (live)', dev: 'Dev sandbox (test edits)' }));
+  const cid = h('input', { id: 'set-client', value: S.clientId, placeholder: 'from your OAuth 2 application', autocomplete: 'off' });
+  cid.onchange = () => { S.clientId = cid.value.trim(); saveSettings(); };
+  v.append(h('div', { class: 'field' }, h('label', { for: 'set-client' }, 'Client ID'), cid));
+  v.append(sel('signin', 'Sign-in method', { redirect: 'Return to this app automatically', oob: 'Copy a code by hand (for installed iPhone app)' }));
+  v.append(h('p', { class: 'muted', style: 'font-size:13px;margin:0 0 6px' }, `Register an app at ${srv().web}/oauth2/applications/new as a public (non-confidential) client with permissions "Read user preferences", "Modify the map" and "Modify notes". Use this redirect URI:`));
+  v.append(h('div', { class: 'code' }, redirectUri()));
+  v.append(h('h3', {}, 'Camera and compass'));
+  v.append(num('hfov', 'Camera field of view, long side (°)', 1, 'most phones 63–70'));
+  v.append(num('camHeight', 'Camera height above ground (m)', 0.1, 'used for tilt distances'));
+  v.append(num('declination', 'Magnetic declination (°, east positive)', 0.1, 'added to compass readings'));
+  v.append(h('p', { class: 'muted', style: 'font-size:13px' }, 'To calibrate the field of view: photograph two posts you can find on the map, then adjust this until both line up with the OSM overlay at the same heading.'));
+  v.append(h('h3', {}, 'Data on this phone'));
+  const up = [...OBS.values()].filter(o => o.anns.length && o.anns.every(a => a.status === 'uploaded' || a.status === 'rejected'));
+  v.append(h('div', { class: 'row' }, h('span', { class: 'muted', style: 'flex:1' }, `${OBS.size} surveys stored, ${up.length} fully done.`),
+    up.length ? h('button', { class: 'btn small danger', onclick: async () => { for (const o of up) { OBS.delete(o.id); await store.del(o.id); } renderSettings(); toast('Removed finished surveys.'); } }, 'Remove finished') : null));
+  v.append(h('p', { class: 'muted', style: 'font-size:12px;margin-top:24px' }, APP + ' · map data © OpenStreetMap contributors, ODbL'));
+}
+
+/* ---------- boot ---------- */
+for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => go(b.dataset.v));
+$('#btnStart').addEventListener('click', startSensors);
+$('#btnShoot').addEventListener('click', shoot);
+$('#btnStop').addEventListener('click', stopAll);
+for (const id of ['importFile', 'importFile2']) $('#' + id).addEventListener('change', e => { importPhoto(e.target.files[0]).catch(err => toast(err.message)); e.target.value = ''; });
+(async () => {
+  updateBadge();
+  try { for (const o of await store.all()) OBS.set(o.id, o); } catch (e) { toast('Storage unavailable: ' + e.message); }
+  const returned = await handleOAuthReturn();
+  go(returned ? 'upload' : (OBS.size ? 'surveys' : 'capture'));
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>

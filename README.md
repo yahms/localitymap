@@ -81,6 +81,40 @@ The **Review** tab has four views.
 - **By area**: about 450 m squares named after their main streets, listing every change in the area for bulk approval.
 - **Passes**: a map and list of every road driven, showing how many passes each direction has.
 
+### Letting the camera do it (vision)
+Lining up kerb lines by hand on every photo doesn't scale, and a correction on one photo doesn't fit the next one, because each photo has its own GPS and tilt error. So LocalityMap can look at the photos itself.
+
+**On-device scene model (free).** *Analyse* on a photo, a road sheet or a drive card runs a street-scene model ([SegFormer B0, Cityscapes](https://huggingface.co/Xenova/segformer-b0-finetuned-cityscapes-768-768)) in the browser via [Transformers.js](https://github.com/xenova/transformers.js/). It labels every pixel: road, footpath, verge, vegetation, building, wall, fence, pole, sign, signal, vehicle, person, sky. It downloads about 15 MB once, then works offline. It takes about 2–8 s a photo on a computer with a graphics chip; phones are slower, so analyse long drives on a computer (see *Reviewing on an iPad or computer*). From the labels the app works out:
+
+| From the photo | How | Used for |
+|---|---|---|
+| Both road edges | where the road surface meets footpath, verge, wall, fence etc. on each row | everything below |
+| True camera tilt | the tilt at which both edges come out parallel on the ground | fixes the phone's tilt reading |
+| Road angle to the camera | direction of the edges | fixes the heading against the OSM road |
+| Where the car sat across the road | distance to each edge | fixes the sideways GPS error |
+| Road width, kerb to kerb | distance between the edges | `width`, median over all photos of the road |
+| Footpath or verge on each side | what's beyond each edge | `sidewalk` |
+| Painted lines and their spacing | bright white or yellow pixels inside the road | `lane_markings`, estimated `lanes` |
+| Poles, signs, signals with their position and height | blobs standing on the ground | new points, grouped across photos and passes |
+| Vehicles across the road | where their wheels meet the road | lane hints |
+
+With *Line photos up automatically* on (Settings → Vision), every analysed photo corrects its own turn, tilt and sideways position against the OSM road, no slider work. *What the app sees* on a photo shows the labels; *Undo* restores the original pose.
+
+Limits seen in testing: the small model sometimes reads a footpath as road, parked cars hide kerbs, and one-sided photos can't fix the tilt. The app only lets photos with two clean, straight edges set the width and big corrections, and uses medians over many photos. Widths scale with the camera height, so measure your mount height. The model has no categories for kerb type, line types, power lines or sign text.
+
+**Claude vision (optional, your API key).** For those, *Ask Claude* on a road sends a few of its photos (3 by default) to Claude with the current OSM tags, and gets back a structured answer:
+- kerb type and footpath on each side, lanes each way, centre line, surface, median, lighting, parking, shoulder
+- intersection type and control
+- barriers, fences and walls
+- ordinary power poles and low-voltage lines versus transmission towers and high-voltage lines
+- objects with where they meet the ground, including speed-limit numbers
+
+Left/right and lane directions are converted to the OSM way's direction. The suggestions appear on the road sheet with *Use in road details* and *Add* buttons.
+
+Setup: create a key at console.anthropic.com, paste it in Settings → Vision, pick Haiku (cheaper) or Sonnet (more careful). Each photo is about 1,200 input tokens. The key stays on the device and is never exported. Photos leave the device only when you press *Ask Claude*.
+
+Everything from either model arrives as a suggestion marked *found by the camera* or *suggested by Claude*, and goes through the same review and approval as your own marks. Changesets that include them are tagged `source=survey;camera`. Mention the camera/AI assistance in your changeset comment too.
+
 ### Checking against other passes (expected vs seen)
 From a road sheet or the Passes view, *Check against passes* walks through everything that should be visible along that road:
 - objects already in OSM within 25 m of it: signals, signs, crossings, street lights, poles, hydrants, bus stops, cabinets, trees
@@ -238,7 +272,7 @@ The web app is fine for the survey-review-upload loop. These are the limits you'
 | GPS about 1 Hz, no raw satellite data, no barometer | Live positions are extrapolated; after the drive, the trail smoother fixes most of it. Altitude is GPS-only (±10 m or worse) | ARKit visual-inertial tracking gives centimetre-level relative motion between photos |
 | No AR on iPhone browsers (WebXR AR is Android Chrome only) | The live overlay is a projection of flat ground, not true AR | ARKit: plane detection, depth (LiDAR on Pro models), anchored 3D overlays |
 | Only one app runs in front, and web apps pause in the background | No turn-by-turn navigation alongside capture | CarPlay or in-app navigation in the native capture app |
-| On-device detection of signs, poles and lanes is slow in the browser | Everything is marked and checked by hand | Core ML runs detection on every frame in real time |
+| Vision models in the browser are small and run a photo at a time | The on-device model gives geometry and basic objects, not kerb types or sign text; long drives are best analysed on a computer | Core ML runs larger models on every video frame in real time | Core ML runs detection on every frame in real time |
 | Browser storage can be cleared by iOS for sites not installed to the home screen | Lost surveys if not installed | Files on device, iCloud backup |
 
 **Do we need Xcode yet?** Not for what's here. You'll need a native iPhone app when you want any of: true AR overlays and a 3D model built from the drive, automatic detection while driving, or reliable capture with the screen off. That means a Mac with Xcode and an Apple Developer account (free for installing on your own phone for 7 days at a time; USD 99/year for TestFlight and longer installs).

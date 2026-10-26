@@ -637,7 +637,8 @@ function autoAlign(o) {
     if (best && best.d < 30) {
       const measured = headingOf([rd.dirWorld[0], rd.dirWorld[1], 0]); let sb = headingOf([best.B[0] - best.A[0], best.B[1] - best.A[1], 0]); if (Math.abs(angDiff(sb, measured)) > 90) sb = norm360(sb + 180);
       const turn = angDiff(sb, measured);
-      if (Math.abs(turn) <= 20) {
+      const oneSided = rd.offL == null || rd.offR == null || !rd.tiltSolved;  // a single kerb can't fix the tilt, so trust its angle less
+      if (Math.abs(turn) <= (oneSided ? 8 : 20)) {
         o.cam.adj = p0.adj + turn; out.turn = Math.round(turn * 10) / 10;
         const n = [Math.cos(sb * D2R), -Math.sin(sb * D2R)];  // right-hand normal of the OSM road direction
         const sOsm = -(best.pt[0] * n[0] + best.pt[1] * n[1]);  // where the camera is now, across the OSM centreline

@@ -1,5 +1,5 @@
 // Offline shell: the app and Leaflet are cached; OSM API calls and map tiles always go to the network.
-const CACHE = 'localitymap-v10';
+const CACHE = 'localitymap-v11';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
